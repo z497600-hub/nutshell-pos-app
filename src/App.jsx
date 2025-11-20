@@ -60,6 +60,7 @@ export default function App() {
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(''); 
   const [newExpense, setNewExpense] = useState({ category: '其他', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
   const [customCategory, setCustomCategory] = useState('');
+  const [expandedBrands, setExpandedBrands] = useState({}); // 新增：控制品牌展開狀態
 
   // --- Modal 狀態 ---
   const [foodModal, setFoodModal] = useState({ isOpen: false, item: null, addons: [] });
@@ -100,9 +101,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    // Helper: 使用符合權限規則的正確路徑 /artifacts/{appId}/public/data/{collectionName}
     const subscribe = (collectionName, setter) => {
-        // 注意這裡的路徑結構
         const colRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
         const q = query(colRef);
         
@@ -128,11 +127,10 @@ export default function App() {
   }, [user]);
 
 
-  // --- Helper: Write to Firestore (Correct Path) ---
+  // --- Helper: Write to Firestore ---
   const dbSet = async (coll, data) => {
     if (!user) return;
     try {
-        // 使用與讀取相同的路徑結構
         const docRef = doc(db, 'artifacts', appId, 'public', 'data', coll, String(data.id));
         await setDoc(docRef, data);
     } catch (e) { console.error("Write Error:", e); showToast("儲存失敗", "error"); }
@@ -162,6 +160,10 @@ export default function App() {
 
   const toggleTrans = (id) => {
     setExpandedTrans(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const toggleBrand = (brand) => {
+    setExpandedBrands(prev => ({ ...prev, [brand]: !prev[brand] }));
   };
 
   const formatDate = (isoString) => {
@@ -223,6 +225,25 @@ export default function App() {
   const foodInventory = inventory.filter(i => i.category === 'food');
 
   // --- 資料計算邏輯 ---
+  const groupedDrinks = useMemo(() => {
+    const drinks = [...bottleInventory, ...kegInventory];
+    const groups = {};
+    drinks.forEach(item => {
+      const brand = item.brand ? item.brand.trim() : '其他品牌';
+      if (!groups[brand]) groups[brand] = [];
+      groups[brand].push(item);
+    });
+    return groups;
+  }, [bottleInventory, kegInventory]);
+
+  const sortedBrands = useMemo(() => {
+    return Object.keys(groupedDrinks).sort((a, b) => {
+        if (a === '其他品牌') return 1;
+        if (b === '其他品牌') return -1;
+        return a.localeCompare(b);
+    });
+  }, [groupedDrinks]);
+
   const groupedSales = useMemo(() => {
     const groups = {}; 
     salesLog.forEach(sale => {
@@ -984,19 +1005,39 @@ export default function App() {
                             </div>
                         </div>
                     )}
-                    <div className="grid grid-cols-2 gap-2 pb-4">
-                      {[...bottleInventory, ...kegInventory].map(item => (
-                        <button key={item.id} onClick={() => handleItemClick(item)} disabled={item.stock <= 0 && !item.isKeg} className={`p-3 rounded-lg text-left border transition-all active:scale-95 ${item.stock > 0 || item.isKeg ? 'bg-gray-800 border-gray-700 hover:border-amber-500/50 hover:bg-gray-750 shadow-sm' : 'bg-gray-900 border-gray-800 opacity-50 cursor-not-allowed'}`}>
-                          <div className="font-bold text-sm text-gray-200 truncate">
-                             {item.brand && <span className="text-xs text-gray-400 block">{item.brand}</span>}
-                             {item.name}
-                          </div>
-                          <div className="flex justify-between items-end mt-1">
-                            <span className="text-amber-500 font-mono font-bold">${item.price}</span>
-                            <span className={`text-[10px] px-1.5 rounded ${item.stock < 1 && !item.isKeg ? 'bg-red-900 text-red-200' : 'bg-gray-700 text-gray-400'}`}>{item.isKeg ? (item.stock > 0 ? '供應中' : '已售完') : `剩${item.stock}`}</span>
-                          </div>
-                        </button>
-                      ))}
+                    {/* 新增：品牌分類顯示區域 */}
+                    <div className="space-y-2 pb-4">
+                        {sortedBrands.map(brand => (
+                            <div key={brand} className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+                                <button
+                                    onClick={() => toggleBrand(brand)}
+                                    className="w-full flex justify-between items-center p-3 bg-gray-750 hover:bg-gray-700 transition-colors"
+                                >
+                                    <div className="font-bold text-gray-200 flex items-center gap-2">
+                                        {brand}
+                                        <span className="text-xs bg-gray-900 text-gray-400 px-2 py-0.5 rounded-full">{groupedDrinks[brand].length}</span>
+                                    </div>
+                                    {expandedBrands[brand] ? <ChevronUp size={16} className="text-gray-400"/> : <ChevronDown size={16} className="text-gray-400"/>}
+                                </button>
+                                
+                                {expandedBrands[brand] && (
+                                    <div className="p-2 grid grid-cols-2 gap-2 bg-gray-900/30 border-t border-gray-700 animate-in slide-in-from-top-1">
+                                        {groupedDrinks[brand].map(item => (
+                                            <button key={item.id} onClick={() => handleItemClick(item)} disabled={item.stock <= 0 && !item.isKeg} className={`p-3 rounded-lg text-left border transition-all active:scale-95 ${item.stock > 0 || item.isKeg ? 'bg-gray-800 border-gray-700 hover:border-amber-500/50 hover:bg-gray-750 shadow-sm' : 'bg-gray-900 border-gray-800 opacity-50 cursor-not-allowed'}`}>
+                                                <div className="font-bold text-sm text-gray-200 truncate">
+                                                   {/* 品牌已在標題顯示，此處省略 */}
+                                                   {item.name}
+                                                </div>
+                                                <div className="flex justify-between items-end mt-1">
+                                                  <span className="text-amber-500 font-mono font-bold">${item.price}</span>
+                                                  <span className={`text-[10px] px-1.5 rounded ${item.stock < 1 && !item.isKeg ? 'bg-red-900 text-red-200' : 'bg-gray-700 text-gray-400'}`}>{item.isKeg ? (item.stock > 0 ? '供應中' : '已售完') : `剩${item.stock}`}</span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
                     </div>
                   </div>
                 </div>
