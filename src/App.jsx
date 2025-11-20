@@ -113,7 +113,7 @@ export default function App() {
   const formatDate = (isoString) => {
     if (!isoString) return '';
     const date = new Date(isoString);
-    if (isNaN(date.getTime())) return ''; // 防呆：無效日期
+    if (isNaN(date.getTime())) return ''; 
     return date.toLocaleString('zh-TW', {
       year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', hour12: false
@@ -123,7 +123,7 @@ export default function App() {
   const toLocalISOString = (dateString) => {
       if (!dateString) return '';
       const d = new Date(dateString);
-      if (isNaN(d.getTime())) return ''; // 防呆：無效日期
+      if (isNaN(d.getTime())) return ''; 
       const pad = (num) => (num < 10 ? '0' : '') + num;
       return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
@@ -142,6 +142,26 @@ export default function App() {
     link.href = URL.createObjectURL(blob);
     link.download = `${filename}_${new Date().toLocaleDateString()}.csv`;
     link.click();
+  };
+
+  // 新增：專門匯出庫存的功能 (轉中文標題)
+  const handleExportInventory = () => {
+    const dataToExport = inventory.map(item => ({
+        '名稱': item.name,
+        '品牌': item.brand || '',
+        '類別': item.category === 'food' ? '餐點' : '飲品',
+        '形式': item.isKeg ? (item.category === 'food' ? '批次餐點' : '桶裝生啤') : '瓶裝/單份',
+        '風格/備註': item.style || '',
+        '成本': item.cost,
+        '售價': item.price,
+        '庫存數量': item.isKeg ? (item.stock > 0 ? '供應中' : '已用盡') : item.stock,
+        '已售份數(批次)': item.glassesSold || 0,
+        '累積營收(批次)': item.kegRevenue || 0,
+        '入庫時間': formatDate(item.createdAt),
+        '開桶/開賣時間': item.openedAt ? formatDate(item.openedAt) : ''
+    }));
+    exportToCSV(dataToExport, 'inventory_status');
+    showToast('庫存表已匯出');
   };
 
   // 分類庫存
@@ -945,7 +965,12 @@ export default function App() {
 
         {activeTab === 'inventory' && (
           <div className="space-y-4">
-            <button onClick={() => setIsAdding(!isAdding)} className="w-full bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all">{isAdding ? '隱藏新增區塊' : <><Plus size={20}/> 新增品項</>}</button>
+            {/* 新增：匯出按鈕 (Header 區域) */}
+            <div className="flex gap-2">
+                <button onClick={() => setIsAdding(!isAdding)} className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all">{isAdding ? '隱藏新增區塊' : <><Plus size={20}/> 新增品項</>}</button>
+                <button onClick={handleExportInventory} className="w-1/3 bg-gray-700 hover:bg-gray-600 text-gray-200 py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all border border-gray-600"><Download size={20}/> 匯出</button>
+            </div>
+            
             {isAdding && (
               <div className="bg-gray-800 p-4 rounded-lg border border-amber-500/50 animate-in fade-in slide-in-from-top-2">
                 <div className="mb-3">
