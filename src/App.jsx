@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Beer, DollarSign, BarChart3, Users, History, Save, AlertCircle, ChevronLeft, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Download, Gift, Wine, Calendar, ClipboardList, Zap, Droplet, Wifi, FileText, Archive, Percent, Settings, Edit3, Utensils, Bell, BellRing, X, User, Briefcase } from 'lucide-react';
+import { Plus, Trash2, Beer, DollarSign, BarChart3, Users, History, Save, AlertCircle, ChevronLeft, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, ChevronsUp, Download, Gift, Wine, Calendar, ClipboardList, Zap, Droplet, Wifi, FileText, Archive, Percent, Settings, Edit3, Utensils, Bell, BellRing, X, User, Briefcase, Database, TrendingUp, Banknote } from 'lucide-react';
 
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
@@ -50,7 +50,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('pos');
   const [statsSubTab, setStatsSubTab] = useState('overview');
   const [selectedMonth, setSelectedMonth] = useState(null);
-  
+  const [customerChartUnit, setCustomerChartUnit] = useState('day'); // 'day' or 'month' for customer count chart
+
   // --- 操作狀態 ---
   const [selectedGuestId, setSelectedGuestId] = useState(null); 
   const [newGuestName, setNewGuestName] = useState(''); 
@@ -60,7 +61,7 @@ export default function App() {
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(''); 
   const [newExpense, setNewExpense] = useState({ category: '其他', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
   const [customCategory, setCustomCategory] = useState('');
-  const [expandedBrands, setExpandedBrands] = useState({}); // 新增：控制品牌展開狀態
+  const [expandedBrands, setExpandedBrands] = useState({}); 
 
   // --- Modal 狀態 ---
   const [foodModal, setFoodModal] = useState({ isOpen: false, item: null, addons: [] });
@@ -166,6 +167,10 @@ export default function App() {
     setExpandedBrands(prev => ({ ...prev, [brand]: !prev[brand] }));
   };
 
+  const handleCollapseAll = () => {
+    setExpandedBrands({});
+  };
+
   const formatDate = (isoString) => {
     if (!isoString) return '';
     const date = new Date(isoString);
@@ -217,6 +222,29 @@ export default function App() {
     }));
     exportToCSV(dataToExport, 'inventory_status');
     showToast('庫存表已匯出');
+  };
+
+  // 2. 系統備份功能 (匯出 JSON)
+  const handleSystemBackup = () => {
+    const backupData = {
+        timestamp: new Date().toISOString(),
+        inventory,
+        productHistory,
+        salesLog,
+        manualMonthlyData,
+        expenses,
+        activeGuests,
+        addons
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "nutshell_backup_" + new Date().toLocaleDateString() + ".json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+    showToast('系統備份檔已下載');
   };
 
   // 分類庫存
@@ -311,6 +339,80 @@ export default function App() {
       .slice(-12);
   }, [salesLog, manualMonthlyData, expenses]);
 
+  // --- 新增：來客數統計 ---
+  const customerStats = useMemo(() => {
+    const counts = {};
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    salesLog.forEach(sale => {
+        const d = new Date(sale.timestamp);
+        if(isNaN(d.getTime())) return;
+
+        const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+        // 單位：月
+        if (customerChartUnit === 'month') {
+             if (!counts[mKey]) counts[mKey] = new Set();
+             counts[mKey].add(sale.transactionId);
+        } else {
+             // 單位：日 (需判斷是否選擇月份)
+             if (selectedMonth) {
+                 if (mKey === selectedMonth) {
+                     if (!counts[dKey]) counts[dKey] = new Set();
+                     counts[dKey].add(sale.transactionId);
+                 }
+             } else {
+                 // 沒選月份，預設顯示最近30天
+                 if (d >= thirtyDaysAgo) {
+                     if (!counts[dKey]) counts[dKey] = new Set();
+                     counts[dKey].add(sale.transactionId);
+                 }
+             }
+        }
+    });
+
+    return Object.entries(counts)
+        .map(([date, set]) => ({ date, count: set.size }))
+        .sort((a, b) => b.date.localeCompare(a.date));
+  }, [salesLog, customerChartUnit, selectedMonth]);
+
+  // --- 新增：客單價統計 ---
+  const avgSpendingStats = useMemo(() => {
+    const stats = {};
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    salesLog.forEach(sale => {
+        const d = new Date(sale.timestamp);
+        if(isNaN(d.getTime())) return;
+
+        const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+        // 僅在日模式下顯示
+        if (selectedMonth) {
+             if (mKey !== selectedMonth) return;
+        } else {
+             if (d < thirtyDaysAgo) return;
+        }
+        
+        if (!stats[dKey]) stats[dKey] = { revenue: 0, transactions: new Set() };
+        stats[dKey].revenue += sale.price;
+        stats[dKey].transactions.add(sale.transactionId);
+    });
+
+    return Object.entries(stats)
+        .map(([date, data]) => ({
+            date,
+            avg: data.transactions.size > 0 ? Math.round(data.revenue / data.transactions.size) : 0
+        }))
+        .sort((a, b) => b.date.localeCompare(a.date));
+  }, [salesLog, selectedMonth]);
+
   const dailyStats = useMemo(() => {
     if (!selectedMonth) return [];
     const days = {};
@@ -346,29 +448,63 @@ export default function App() {
   const handleAddItem = (e) => {
     e.preventDefault();
     if (!newItem.name || !newItem.price) return;
-    const isBatchMode = newItem.isKeg || newItem.category === 'food';
-    const itemData = {
-      id: Date.now(), name: newItem.name, brand: newItem.brand || '', 
-      style: newItem.style || (newItem.category === 'food' ? 'Food' : 'Lager'),
-      cost: Number(newItem.cost) || 0, price: Number(newItem.price) || 0,
-      stock: isBatchMode ? 1 : (Number(newItem.stock) || 0), isKeg: isBatchMode,
-      category: newItem.category || 'drink', kegRevenue: 0, glassesSold: 0, createdAt: new Date().toISOString()
-    };
     
-    dbSet('inventory', itemData);
-
-    const historyExists = productHistory.some(h => h.name === itemData.name);
-    if (!historyExists) {
-        const historyData = { 
-            id: Date.now() + 1, 
-            name: itemData.name, 
-            brand: itemData.brand, 
-            style: itemData.style, 
-            isKeg: itemData.isKeg, 
-            category: itemData.category 
-        };
-        dbSet('history', historyData);
+    const isBatchMode = newItem.isKeg || newItem.category === 'food';
+    
+    // 1. 檢查是否為同名商品 (僅針對非批次/非生啤的瓶裝酒)
+    let existingItem = null;
+    if (!isBatchMode) {
+        existingItem = inventory.find(
+            i => i.name === newItem.name && !i.isKeg && i.category === newItem.category
+        );
     }
+
+    if (existingItem) {
+        // 更新現有庫存
+        const addedStock = Number(newItem.stock) || 0;
+        const updatedItem = {
+            ...existingItem,
+            stock: (existingItem.stock || 0) + addedStock,
+            cost: Number(newItem.cost),   
+            price: Number(newItem.price), 
+            brand: newItem.brand || existingItem.brand,
+            style: newItem.style || existingItem.style
+        };
+        dbSet('inventory', updatedItem);
+        showToast(`已合併庫存：${newItem.name} (+${addedStock})`);
+    } else {
+        // 新增全新項目
+        const itemData = {
+            id: Date.now(), 
+            name: newItem.name, 
+            brand: newItem.brand || '', 
+            style: newItem.style || (newItem.category === 'food' ? 'Food' : 'Lager'),
+            cost: Number(newItem.cost) || 0, 
+            price: Number(newItem.price) || 0,
+            stock: isBatchMode ? 1 : (Number(newItem.stock) || 0), 
+            isKeg: isBatchMode,
+            category: newItem.category || 'drink', 
+            kegRevenue: 0, 
+            glassesSold: 0, 
+            createdAt: new Date().toISOString()
+        };
+        dbSet('inventory', itemData);
+        showToast('已新增商品');
+    }
+
+    // 2. 更新歷史紀錄
+    const historyItem = productHistory.find(h => h.name === newItem.name);
+    const historyData = { 
+        id: historyItem ? historyItem.id : Date.now() + 1, 
+        name: newItem.name, 
+        brand: newItem.brand || '', 
+        style: newItem.style || '', 
+        isKeg: newItem.isKeg, 
+        category: newItem.category,
+        cost: Number(newItem.cost),
+        price: Number(newItem.price)
+    };
+    dbSet('history', historyData);
     
     setNewItem(prev => ({
         ...prev,
@@ -377,8 +513,6 @@ export default function App() {
         price: '',
         stock: '',
     }));
-    
-    showToast('已新增商品 (可繼續輸入)');
   };
 
   const handleRestockHistoryItem = (historyItemName) => {
@@ -522,11 +656,19 @@ export default function App() {
   const handleAddToTab = (item) => {
     if (!item.isKeg && item.stock <= 0) { showToast('庫存不足！無法加入', 'error'); return; }
     
+    // 1. Update Inventory (Auto-delete if 0)
     if (!item.isKeg) {
-      const updatedItem = { ...item, stock: item.stock - 1 };
-      dbSet('inventory', updatedItem);
+      const newStock = item.stock - 1;
+      if (newStock <= 0) {
+          dbDelete('inventory', item.id);
+          showToast(`${item.name} 完售，已從庫存移除`);
+      } else {
+          const updatedItem = { ...item, stock: newStock };
+          dbSet('inventory', updatedItem);
+      }
     }
     
+    // 2. Update Guest
     const guest = activeGuests.find(g => g.id === selectedGuestId);
     if (guest) {
         const defaultType = guest.type === 'tasting' ? 'tasting' : 'sale';
@@ -585,11 +727,23 @@ export default function App() {
   };
 
   const handleRemoveFromTab = (guestId, orderId, itemId) => {
-    const targetItem = inventory.find(i => i.id === itemId);
-    if (targetItem && !targetItem.isKeg) {
-        dbSet('inventory', { ...targetItem, stock: targetItem.stock + 1 });
-    }
+    // 1. Restore Inventory (Create new if deleted)
     const guest = activeGuests.find(g => g.id === guestId);
+    const orderItem = guest?.items.find(i => i.orderId === orderId);
+
+    if (orderItem && !orderItem.isKeg) {
+        const targetItem = inventory.find(i => i.id === itemId);
+        if (targetItem) {
+            dbSet('inventory', { ...targetItem, stock: targetItem.stock + 1 });
+        } else {
+            // Restore deleted item
+            const { orderId, type, served, selectedAddons, ...originItem } = orderItem;
+            dbSet('inventory', { ...originItem, stock: 1 });
+            showToast(`${originItem.name} 已回補至庫存`);
+        }
+    }
+
+    // 2. Update Guest
     if (guest) {
         const newItems = guest.items.filter(item => item.orderId !== orderId);
         dbSet('guests', { ...guest, items: newItems });
@@ -691,9 +845,17 @@ export default function App() {
         guest.items.forEach(item => { if (!item.isKeg) { itemCounts[item.id] = (itemCounts[item.id] || 0) + 1; } });
         
         for (const [itemId, count] of Object.entries(itemCounts)) {
-             const invItem = inventory.find(i => i.id === Number(itemId));
+             const numId = Number(itemId);
+             const invItem = inventory.find(i => i.id === numId);
              if (invItem) {
                  dbSet('inventory', { ...invItem, stock: invItem.stock + count });
+             } else {
+                 // Restore deleted item
+                 const prototype = guest.items.find(i => i.id === numId);
+                 if (prototype) {
+                     const { orderId, type, served, selectedAddons, ...originItem } = prototype;
+                     dbSet('inventory', { ...originItem, stock: count });
+                 }
              }
         }
 
@@ -735,7 +897,10 @@ export default function App() {
   }, 0) : 0;
   const currentGuestTotal = Math.max(0, currentGuestSubtotal - (currentGuest?.discount || 0));
 
-  const maxMonthlyProfit = Math.max(...monthlyData.map(m => m.profit), 100);
+  const maxMonthlyProfit = Math.max(...monthlyData.map(m => Math.abs(m.profit)), 100);
+  const maxCustomerCount = Math.max(1, ...customerStats.map(c=>c.count));
+  const maxAvgSpend = Math.max(1, ...avgSpendingStats.map(c => c.avg));
+
   const displayAddons = addons.length > 0 ? addons : DEFAULT_ADDONS;
 
   return (
@@ -991,7 +1156,17 @@ export default function App() {
                     </div>
                   </div>
                   <div>
-                    <h3 className="text-xs text-gray-400 mb-2 font-bold sticky top-0 bg-gray-900 py-1 z-10">餐點與酒水</h3>
+                    {/* 餐點與酒水 Header 區域 */}
+                    <div className="flex justify-between items-center mb-2 sticky top-0 bg-gray-900 py-1 z-10">
+                        <h3 className="text-xs text-gray-400 font-bold">餐點與酒水</h3>
+                        <button 
+                            onClick={handleCollapseAll} 
+                            className="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded border border-gray-700 flex items-center gap-1 hover:text-white active:bg-gray-700 transition-colors"
+                        >
+                            <ChevronsUp size={12}/> 全部收折
+                        </button>
+                    </div>
+
                     {foodInventory.length > 0 && (
                         <div className="mb-4">
                             <h4 className="text-[10px] text-amber-500 font-bold mb-1 pl-1 flex items-center gap-1"><Utensils size={10}/> 餐點</h4>
@@ -1005,7 +1180,7 @@ export default function App() {
                             </div>
                         </div>
                     )}
-                    {/* 新增：品牌分類顯示區域 */}
+                    {/* 品牌分類顯示區域 */}
                     <div className="space-y-2 pb-4">
                         {sortedBrands.map(brand => (
                             <div key={brand} className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
@@ -1025,7 +1200,6 @@ export default function App() {
                                         {groupedDrinks[brand].map(item => (
                                             <button key={item.id} onClick={() => handleItemClick(item)} disabled={item.stock <= 0 && !item.isKeg} className={`p-3 rounded-lg text-left border transition-all active:scale-95 ${item.stock > 0 || item.isKeg ? 'bg-gray-800 border-gray-700 hover:border-amber-500/50 hover:bg-gray-750 shadow-sm' : 'bg-gray-900 border-gray-800 opacity-50 cursor-not-allowed'}`}>
                                                 <div className="font-bold text-sm text-gray-200 truncate">
-                                                   {/* 品牌已在標題顯示，此處省略 */}
                                                    {item.name}
                                                 </div>
                                                 <div className="flex justify-between items-end mt-1">
@@ -1201,10 +1375,17 @@ export default function App() {
 
         {activeTab === 'stats' && (
           <div className="space-y-4 animate-in fade-in">
-            <div className="flex bg-gray-800 p-1 rounded-lg mb-4 overflow-x-auto">
-              <button onClick={() => setStatsSubTab('overview')} className={`flex-1 py-2 px-3 text-xs rounded-md font-bold whitespace-nowrap transition-colors ${statsSubTab === 'overview' ? 'bg-gray-700 text-white' : 'text-gray-500'}`}>即時概況</button>
-              <button onClick={() => setStatsSubTab('monthly')} className={`flex-1 py-2 px-3 text-xs rounded-md font-bold whitespace-nowrap transition-colors ${statsSubTab === 'monthly' ? 'bg-gray-700 text-white' : 'text-gray-500'}`}>月度分析</button>
-              <button onClick={() => setStatsSubTab('expenses')} className={`flex-1 py-2 px-3 text-xs rounded-md font-bold whitespace-nowrap transition-colors ${statsSubTab === 'expenses' ? 'bg-gray-700 text-white' : 'text-gray-500'}`}>雜支管理</button>
+            <div className="flex bg-gray-800 p-1 rounded-lg mb-4 overflow-x-auto items-center justify-between">
+              <div className="flex gap-1">
+                  <button onClick={() => setStatsSubTab('overview')} className={`py-2 px-3 text-xs rounded-md font-bold whitespace-nowrap transition-colors ${statsSubTab === 'overview' ? 'bg-gray-700 text-white' : 'text-gray-500'}`}>即時概況</button>
+                  <button onClick={() => setStatsSubTab('monthly')} className={`py-2 px-3 text-xs rounded-md font-bold whitespace-nowrap transition-colors ${statsSubTab === 'monthly' ? 'bg-gray-700 text-white' : 'text-gray-500'}`}>月度分析</button>
+                  <button onClick={() => setStatsSubTab('expenses')} className={`py-2 px-3 text-xs rounded-md font-bold whitespace-nowrap transition-colors ${statsSubTab === 'expenses' ? 'bg-gray-700 text-white' : 'text-gray-500'}`}>雜支管理</button>
+              </div>
+              {statsSubTab === 'overview' && (
+                <button onClick={handleSystemBackup} className="flex items-center gap-1 text-[10px] bg-gray-700 text-gray-300 px-2 py-1 rounded hover:bg-gray-600 border border-gray-600">
+                    <Database size={12}/> 備份
+                </button>
+              )}
             </div>
 
             {statsSubTab === 'overview' && (
@@ -1300,10 +1481,10 @@ export default function App() {
 
             {statsSubTab === 'monthly' && (
               <div className="space-y-6">
+                {/* 1. 年度獲利趨勢 (橫向 Bar Chart) */}
                 <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 relative">
                   <div className="flex justify-between items-center mb-4">
                       <h2 className="text-sm font-bold text-gray-300 flex items-center gap-2"><BarChart3 size={16} className="text-amber-500"/> 年度獲利趨勢 <span className="text-xs text-gray-500 ml-2">(點擊月份查看詳情)</span></h2>
-                      {/* 新增：月報表匯出按鈕 */}
                       <button onClick={() => exportToCSV(monthlyData, 'monthly_report')} className="flex items-center gap-1 text-xs bg-green-700/50 hover:bg-green-600 text-green-200 px-2 py-1 rounded border border-green-700 transition-colors">
                           <Download size={12}/> 匯出月報表
                       </button>
@@ -1312,14 +1493,80 @@ export default function App() {
                   {monthlyData.length === 0 ? (
                     <div className="h-40 flex items-center justify-center text-gray-600 text-xs">尚無資料</div>
                   ) : (
-                    <div className="flex items-end gap-2 h-48 pb-6 pt-2 overflow-x-auto">
+                    <div className="space-y-3 pb-4">
                       {monthlyData.map((data) => {
-                        const heightPercent = Math.max((data.profit / maxMonthlyProfit) * 100, 5);
+                        const widthPercent = Math.min(Math.abs(data.profit) / maxMonthlyProfit * 100, 100);
                         const isSelected = selectedMonth === data.month;
                         return (
-                          <div key={data.month} className="flex-1 min-w-[40px] flex flex-col items-center group relative cursor-pointer" onClick={() => setSelectedMonth(data.month === selectedMonth ? null : data.month)}>
-                            <div className={`w-full rounded-t-sm transition-all hover:opacity-80 ${data.profit < 0 ? 'bg-red-500' : 'bg-green-600'} ${isSelected ? 'ring-2 ring-white' : ''}`} style={{ height: `${Math.abs(heightPercent)}%` }}></div>
-                            <div className={`text-[10px] mt-1 whitespace-nowrap rotate-0 ${isSelected ? 'text-white font-bold' : 'text-gray-500'}`}>{data.month.split('-')[1]}月</div>
+                          <div key={data.month} onClick={() => setSelectedMonth(data.month === selectedMonth ? null : data.month)} className="cursor-pointer group">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-12 text-right text-xs font-mono ${isSelected ? 'text-white font-bold' : 'text-gray-500'}`}>{data.month.split('-')[1]}月</div>
+                                <div className="flex-1 h-6 bg-gray-700/50 rounded-full overflow-hidden relative flex items-center">
+                                    <div 
+                                        className={`h-full transition-all duration-500 ${data.profit < 0 ? 'bg-red-500' : 'bg-green-500'} ${isSelected ? 'opacity-100' : 'opacity-80 group-hover:opacity-100'}`} 
+                                        style={{ width: `${Math.max(widthPercent, 2)}%` }}
+                                    ></div>
+                                    <span className="absolute right-2 text-[10px] text-white font-mono drop-shadow-md">${data.profit.toLocaleString()}</span>
+                                </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. 來客數趨勢 (Horizontal Bar Chart) */}
+                <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 relative animate-in fade-in slide-in-from-top-2">
+                  <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-sm font-bold text-gray-300 flex items-center gap-2"><Users size={16} className="text-blue-500"/> 來客數趨勢 <span className="text-xs text-gray-500 ml-2">({customerChartUnit === 'day' ? (selectedMonth ? `${selectedMonth}月` : '近30日') : '近12個月'})</span></h2>
+                      <button 
+                        onClick={() => setCustomerChartUnit(prev => prev === 'day' ? 'month' : 'day')} 
+                        className="text-[10px] bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded border border-gray-600"
+                      >
+                        {customerChartUnit === 'day' ? '切換至月檢視' : '切換至日檢視'}
+                      </button>
+                  </div>
+
+                  {customerStats.length === 0 ? (
+                    <div className="h-20 flex items-center justify-center text-gray-600 text-xs">尚無資料</div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                      {customerStats.map((data) => {
+                        const widthPercent = Math.min(data.count / maxCustCount * 100, 100);
+                        return (
+                          <div key={data.date} className="flex items-center gap-3 text-xs">
+                              <div className="w-20 text-right text-gray-400 font-mono">{data.date.substring(5)}</div>
+                              <div className="flex-1 h-4 bg-gray-700/30 rounded-sm overflow-hidden relative flex items-center">
+                                  <div className="h-full bg-blue-600/80" style={{ width: `${Math.max(widthPercent, 2)}%` }}></div>
+                                  <span className="absolute left-1 text-[9px] text-white font-mono">{data.count}人</span>
+                              </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. 客單價分析 (Horizontal Bar Chart) */}
+                <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 relative animate-in fade-in slide-in-from-top-4">
+                  <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-sm font-bold text-gray-300 flex items-center gap-2"><Banknote size={16} className="text-purple-500"/> 客單價分析 <span className="text-xs text-gray-500 ml-2">({selectedMonth ? `${selectedMonth}月` : '近30日'})</span></h2>
+                  </div>
+
+                  {avgSpendingStats.length === 0 ? (
+                    <div className="h-20 flex items-center justify-center text-gray-600 text-xs">尚無資料 (請先選擇月份或產生交易)</div>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                      {avgSpendingStats.map((data) => {
+                        const widthPercent = Math.min(data.avg / maxAvgSpend * 100, 100);
+                        return (
+                          <div key={data.date} className="flex items-center gap-3 text-xs">
+                              <div className="w-20 text-right text-gray-400 font-mono">{data.date.substring(5)}</div>
+                              <div className="flex-1 h-4 bg-gray-700/30 rounded-sm overflow-hidden relative flex items-center">
+                                  <div className="h-full bg-purple-600/80" style={{ width: `${Math.max(widthPercent, 2)}%` }}></div>
+                                  <span className="absolute left-1 text-[9px] text-white font-mono">${data.avg}</span>
+                              </div>
                           </div>
                         );
                       })}
