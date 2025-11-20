@@ -1,22 +1,31 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Trash2, Beer, DollarSign, BarChart3, Users, History, Save, AlertCircle, ChevronLeft, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, Download, Gift, Wine, Calendar, ClipboardList, Zap, Droplet, Wifi, FileText, Archive, Percent, Settings, Edit3, Utensils, Bell, BellRing, X, User, Briefcase } from 'lucide-react';
 
-// --- Local Storage Keys ---
-const STORAGE_KEYS = {
-    INVENTORY: 'nutshell_inventory',
-    HISTORY: 'nutshell_product_history',
-    SALES: 'nutshell_sales_log',
-    GUESTS: 'nutshell_active_guests',
-    EXPENSES: 'nutshell_expenses',
-    MANUAL_MONTHLY: 'nutshell_manual_monthly',
-    ADDONS: 'nutshell_addons',
-    LAST_TAB: 'nutshell_last_tab'
+// --- Firebase Imports ---
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query } from 'firebase/firestore';
+
+// --- Firebase Configuration ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+  apiKey: "AIzaSyCttL6OGxarz4OivOqYYYbeXAmFacrItiQ",
+  authDomain: "nutshell-manage-6f33d.firebaseapp.com",
+  projectId: "nutshell-manage-6f33d",
+  storageBucket: "nutshell-manage-6f33d.firebasestorage.app",
+  messagingSenderId: "729068840654",
+  appId: "1:729068840654:web:f5933600d7e3ea74fe529f",
+  measurementId: "G-F2SP6JV209"
 };
 
-// 預設雜支項目
-const DEFAULT_EXPENSE_CATEGORIES = ['水費', '電費', '網路費', '店租', '耗材', '其他'];
+// --- App ID Configuration (Critical for Permissions) ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'nutshell-pos-default';
 
-// 預設初始客製選項
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// --- Constants ---
+const DEFAULT_EXPENSE_CATEGORIES = ['水費', '電費', '網路費', '店租', '耗材', '其他'];
 const DEFAULT_ADDONS = [
   { id: 'patty', name: '加漢堡排', price: 60 },
   { id: 'cheese', name: '加起司', price: 20 },
@@ -24,44 +33,28 @@ const DEFAULT_ADDONS = [
   { id: 'egg', name: '加蛋', price: 15 },
 ];
 
-// --- Local Storage Helper Functions ---
-const loadData = (key, defaultValue = []) => {
-    try {
-        const stored = localStorage.getItem(key);
-        return stored ? JSON.parse(stored) : defaultValue;
-    } catch (e) {
-        console.error(`Error loading data for ${key}:`, e);
-        return defaultValue;
-    }
-};
-
-const saveData = (key, data) => {
-    try {
-        localStorage.setItem(key, JSON.stringify(data));
-    } catch (e) {
-        console.error(`Error saving data for ${key}:`, e);
-    }
-};
-
 export default function App() {
   // --- 資料狀態 ---
-  const [inventory, setInventory] = useState(() => loadData(STORAGE_KEYS.INVENTORY));
-  const [productHistory, setProductHistory] = useState(() => loadData(STORAGE_KEYS.HISTORY));
-  const [salesLog, setSalesLog] = useState(() => loadData(STORAGE_KEYS.SALES)); 
-  const [manualMonthlyData, setManualMonthlyData] = useState(() => loadData(STORAGE_KEYS.MANUAL_MONTHLY));
-  const [expenses, setExpenses] = useState(() => loadData(STORAGE_KEYS.EXPENSES)); 
-  const [activeGuests, setActiveGuests] = useState(() => loadData(STORAGE_KEYS.GUESTS)); 
-  const [addons, setAddons] = useState(() => loadData(STORAGE_KEYS.ADDONS, DEFAULT_ADDONS)); 
-
+  const [inventory, setInventory] = useState([]);
+  const [productHistory, setProductHistory] = useState([]);
+  const [salesLog, setSalesLog] = useState([]); 
+  const [manualMonthlyData, setManualMonthlyData] = useState([]);
+  const [expenses, setExpenses] = useState([]); 
+  const [activeGuests, setActiveGuests] = useState([]); 
+  const [addons, setAddons] = useState([]); 
+  
+  // --- 使用者狀態 ---
+  const [user, setUser] = useState(null);
+  
   // --- 頁面狀態 ---
-  const [activeTab, setActiveTab] = useState(() => loadData(STORAGE_KEYS.LAST_TAB, 'pos'));
+  const [activeTab, setActiveTab] = useState('pos');
   const [statsSubTab, setStatsSubTab] = useState('overview');
   const [selectedMonth, setSelectedMonth] = useState(null);
   
   // --- 操作狀態 ---
   const [selectedGuestId, setSelectedGuestId] = useState(null); 
   const [newGuestName, setNewGuestName] = useState(''); 
-  const [newGuestType, setNewGuestType] = useState('guest'); // 'guest' | 'tasting'
+  const [newGuestType, setNewGuestType] = useState('guest'); 
   const [isAdding, setIsAdding] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', brand: '', style: '', cost: '', price: '', stock: '', isKeg: false, category: 'drink' });
   const [selectedHistoryItem, setSelectedHistoryItem] = useState(''); 
@@ -82,15 +75,76 @@ export default function App() {
   const [expandedTrans, setExpandedTrans] = useState({});
   const [manualEntry, setManualEntry] = useState({ month: '', profit: '' });
 
-  // --- Local Storage Effect ---
-  useEffect(() => saveData(STORAGE_KEYS.INVENTORY, inventory), [inventory]);
-  useEffect(() => saveData(STORAGE_KEYS.HISTORY, productHistory), [productHistory]);
-  useEffect(() => saveData(STORAGE_KEYS.SALES, salesLog), [salesLog]);
-  useEffect(() => saveData(STORAGE_KEYS.GUESTS, activeGuests), [activeGuests]);
-  useEffect(() => saveData(STORAGE_KEYS.EXPENSES, expenses), [expenses]);
-  useEffect(() => saveData(STORAGE_KEYS.MANUAL_MONTHLY, manualMonthlyData), [manualMonthlyData]);
-  useEffect(() => saveData(STORAGE_KEYS.ADDONS, addons), [addons]);
-  useEffect(() => saveData(STORAGE_KEYS.LAST_TAB, activeTab), [activeTab]);
+  // --- Firebase Authentication & Sync ---
+  useEffect(() => {
+    const initAuth = async () => {
+        try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        } catch (error) {
+            console.error("Auth Error:", error);
+            showToast("登入失敗，無法同步資料", "error");
+        }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // 監聽資料庫變動
+  useEffect(() => {
+    if (!user) return;
+
+    // Helper: 使用符合權限規則的正確路徑 /artifacts/{appId}/public/data/{collectionName}
+    const subscribe = (collectionName, setter) => {
+        // 注意這裡的路徑結構
+        const colRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
+        const q = query(colRef);
+        
+        return onSnapshot(q, (snapshot) => {
+            const data = snapshot.docs.map(doc => ({ ...doc.data(), id: isNaN(Number(doc.id)) ? doc.id : Number(doc.id) }));
+            setter(data);
+        }, (error) => {
+            console.error(`Sync error for ${collectionName}:`, error);
+        });
+    };
+
+    const unsubs = [
+        subscribe('inventory', setInventory),
+        subscribe('history', setProductHistory),
+        subscribe('sales', setSalesLog),
+        subscribe('guests', setActiveGuests),
+        subscribe('expenses', setExpenses),
+        subscribe('manual_monthly', setManualMonthlyData),
+        subscribe('addons', setAddons)
+    ];
+    
+    return () => unsubs.forEach(unsub => unsub());
+  }, [user]);
+
+
+  // --- Helper: Write to Firestore (Correct Path) ---
+  const dbSet = async (coll, data) => {
+    if (!user) return;
+    try {
+        // 使用與讀取相同的路徑結構
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', coll, String(data.id));
+        await setDoc(docRef, data);
+    } catch (e) { console.error("Write Error:", e); showToast("儲存失敗", "error"); }
+  };
+
+  const dbDelete = async (coll, id) => {
+    if (!user) return;
+    try {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', coll, String(id));
+        await deleteDoc(docRef);
+    } catch (e) { console.error("Delete Error:", e); showToast("刪除失敗", "error"); }
+  };
 
   // --- UI Helper Functions ---
   const showToast = (message, type = 'success') => {
@@ -144,7 +198,6 @@ export default function App() {
     link.click();
   };
 
-  // 新增：專門匯出庫存的功能 (轉中文標題)
   const handleExportInventory = () => {
     const dataToExport = inventory.map(item => ({
         '名稱': item.name,
@@ -209,7 +262,7 @@ export default function App() {
     salesLog.forEach(sale => {
       if(!sale.timestamp) return;
       const date = new Date(sale.timestamp); 
-      if (isNaN(date.getTime())) return; // 防呆
+      if (isNaN(date.getTime())) return; 
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       if (!stats[monthKey]) stats[monthKey] = { month: monthKey, revenue: 0, profit: 0, source: 'system' };
       stats[monthKey].revenue += sale.price;
@@ -218,7 +271,7 @@ export default function App() {
     expenses.forEach(exp => {
       if(!exp.date) return;
       const date = new Date(exp.date);
-      if (isNaN(date.getTime())) return; // 防呆
+      if (isNaN(date.getTime())) return; 
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       if (stats[monthKey]) {
           if(!stats[monthKey].profit) stats[monthKey].profit = 0;
@@ -244,7 +297,7 @@ export default function App() {
     salesLog.forEach(sale => {
         if (!sale.timestamp) return;
         const dateObj = new Date(sale.timestamp);
-        if (isNaN(dateObj.getTime())) return; // 防呆
+        if (isNaN(dateObj.getTime())) return; 
         const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
         
         if (monthKey === selectedMonth) {
@@ -268,7 +321,7 @@ export default function App() {
     return Object.values(days).sort((a, b) => b.date.localeCompare(a.date));
   }, [selectedMonth, salesLog, expenses]);
 
-  // --- 業務邏輯 ---
+  // --- 業務邏輯 (寫入 Firestore) ---
   const handleAddItem = (e) => {
     e.preventDefault();
     if (!newItem.name || !newItem.price) return;
@@ -280,17 +333,20 @@ export default function App() {
       stock: isBatchMode ? 1 : (Number(newItem.stock) || 0), isKeg: isBatchMode,
       category: newItem.category || 'drink', kegRevenue: 0, glassesSold: 0, createdAt: new Date().toISOString()
     };
-    setInventory(prev => [...prev, itemData]);
+    
+    dbSet('inventory', itemData);
+
     const historyExists = productHistory.some(h => h.name === itemData.name);
     if (!historyExists) {
-        setProductHistory(prev => [...prev, { 
-            id: Date.now(), 
+        const historyData = { 
+            id: Date.now() + 1, 
             name: itemData.name, 
             brand: itemData.brand, 
             style: itemData.style, 
             isKeg: itemData.isKeg, 
             category: itemData.category 
-        }]);
+        };
+        dbSet('history', historyData);
     }
     
     setNewItem(prev => ({
@@ -324,7 +380,7 @@ export default function App() {
     setConfirmModal({
       isOpen: true, title: '刪除品項', message: '確定要從目前庫存中刪除嗎？', isDanger: true,
       onConfirm: () => {
-        setInventory(prev => prev.filter(item => item.id !== id));
+        dbDelete('inventory', id);
         showToast('品項已移除', 'success');
         closeConfirm();
       }
@@ -340,11 +396,12 @@ export default function App() {
       isDanger: true,
       onConfirm: () => {
         const costRecord = {
+            id: Date.now(),
             transactionId: Date.now(), itemId: item.id, name: `${item.name} (結算損益)`, customerName: '系統結算',
             type: 'keg_cost', profit: finalProfit, price: 0, date: new Date().toLocaleDateString(), timestamp: new Date().toLocaleString()
         };
-        setSalesLog(prev => [...prev, costRecord]);
-        setInventory(prev => prev.filter(i => i.id !== item.id));
+        dbSet('sales', costRecord);
+        dbDelete('inventory', item.id);
         showToast(`${itemTypeLabel}已結算，損益 ${finalProfit}`, finalProfit >= 0 ? 'success' : 'error');
         closeConfirm();
       }
@@ -354,32 +411,31 @@ export default function App() {
   const handleAddCost = () => {
     if (!addCostModal.item || !addCostModal.amount) return;
     const addedAmount = Number(addCostModal.amount);
-    setInventory(prev => prev.map(item => 
-        item.id === addCostModal.item.id ? { ...item, cost: (item.cost || 0) + addedAmount } : item
-    ));
+    const newItem = { ...addCostModal.item, cost: (addCostModal.item.cost || 0) + addedAmount };
+    dbSet('inventory', newItem);
     showToast(`已追加成本 $${addedAmount}`);
     setAddCostModal({ isOpen: false, item: null, amount: '' });
   };
 
   const handleUpdateItemDate = () => {
       if (!dateEditModal.item || !dateEditModal.newDate) return;
-      setInventory(prev => prev.map(item => 
-        item.id === dateEditModal.item.id ? { ...item, openedAt: new Date(dateEditModal.newDate).toISOString() } : item
-      ));
+      const newItem = { ...dateEditModal.item, openedAt: new Date(dateEditModal.newDate).toISOString() };
+      dbSet('inventory', newItem);
       showToast('時間已更新');
       setDateEditModal({ isOpen: false, item: null, newDate: '' });
   };
 
   const handleAddAddon = () => {
       if (!newAddon.name || !newAddon.price) return;
-      setAddons(prev => [...prev, { id: Date.now(), name: newAddon.name, price: Number(newAddon.price) }]);
+      const addonData = { id: Date.now(), name: newAddon.name, price: Number(newAddon.price) };
+      dbSet('addons', addonData);
       setNewAddon({ name: '', price: '' });
       showToast('已新增客製選項');
   };
 
   const handleDeleteAddon = (id) => {
       if(window.confirm('確定刪除此選項？')) {
-          setAddons(prev => prev.filter(addon => addon.id !== id));
+          dbDelete('addons', id);
           showToast('選項已刪除');
       }
   };
@@ -391,7 +447,7 @@ export default function App() {
       id: Date.now(), category: newExpense.category === 'custom' ? customCategory : newExpense.category,
       amount: Number(newExpense.amount), date: newExpense.date, note: newExpense.note, createdAt: new Date().toISOString()
     };
-    setExpenses(prev => [...prev, expenseData]);
+    dbSet('expenses', expenseData);
     setNewExpense({ category: '其他', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
     setCustomCategory('');
     showToast('已新增支出紀錄');
@@ -399,7 +455,7 @@ export default function App() {
 
   const handleDeleteExpense = (id) => {
     if(window.confirm('確定刪除此筆支出？')) {
-        setExpenses(prev => prev.filter(exp => exp.id !== id));
+        dbDelete('expenses', id);
         showToast('支出已刪除');
     }
   };
@@ -409,15 +465,15 @@ export default function App() {
     const newGuest = {
       id: Date.now(), 
       name: newGuestName, 
-      type: newGuestType, // 'guest' or 'tasting'
+      type: newGuestType, 
       items: [], 
       discount: 0, 
       startTime: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
       createdAt: new Date().toISOString()
     };
-    setActiveGuests(prev => [...prev, newGuest]);
+    dbSet('guests', newGuest);
     setNewGuestName('');
-    setNewGuestType('guest'); // Reset to default
+    setNewGuestType('guest'); 
     showToast(`已新增客人：${newGuest.name}`);
   };
 
@@ -444,97 +500,84 @@ export default function App() {
 
   const handleAddToTab = (item) => {
     if (!item.isKeg && item.stock <= 0) { showToast('庫存不足！無法加入', 'error'); return; }
+    
     if (!item.isKeg) {
-      setInventory(prev => prev.map(i => i.id === item.id ? { ...i, stock: i.stock - 1 } : i));
+      const updatedItem = { ...item, stock: item.stock - 1 };
+      dbSet('inventory', updatedItem);
     }
     
-    setActiveGuests(prev => prev.map(guest => {
-        if (guest.id === selectedGuestId) {
-            // 如果客人是「試酒」類型，預設商品為「試酒」狀態
-            const defaultType = guest.type === 'tasting' ? 'tasting' : 'sale';
-            const updatedItems = [...guest.items, { ...item, orderId: Date.now(), type: defaultType }];
-            return { ...guest, items: updatedItems };
-        }
-        return guest;
-    }));
+    const guest = activeGuests.find(g => g.id === selectedGuestId);
+    if (guest) {
+        const defaultType = guest.type === 'tasting' ? 'tasting' : 'sale';
+        const updatedGuest = { ...guest, items: [...guest.items, { ...item, orderId: Date.now(), type: defaultType }] };
+        dbSet('guests', updatedGuest);
+    }
   };
 
-  // 只切換 Sale / Tasting (移除 Treat，Treat 由獨立按鈕控制)
   const toggleItemType = (guestId, orderId) => {
-    setActiveGuests(prev => prev.map(guest => {
-        if (guest.id === guestId) {
-            const newItems = guest.items.map(item => {
-              if (item.orderId === orderId) {
-                // 如果目前是招待，切換此按鈕只會把它變回一般或試酒，不會切換招待
-                // 簡單邏輯：在 Sale 和 Tasting 之間切換
+    const guest = activeGuests.find(g => g.id === guestId);
+    if (guest) {
+        const newItems = guest.items.map(item => {
+            if (item.orderId === orderId) {
                 const nextType = item.type === 'sale' ? 'tasting' : 'sale';
                 return { ...item, type: nextType };
-              }
-              return item;
-            });
-            return { ...guest, items: newItems };
-        }
-        return guest;
-    }));
+            }
+            return item;
+        });
+        dbSet('guests', { ...guest, items: newItems });
+    }
   };
 
-  // 獨立切換 招待 狀態
   const toggleTreat = (guestId, orderId) => {
-      setActiveGuests(prev => prev.map(guest => {
-        if (guest.id === guestId) {
-            const newItems = guest.items.map(item => {
-              if (item.orderId === orderId) {
-                // 如果目前是招待，取消招待回到該客人預設狀態(sale or tasting)
-                // 如果目前不是招待，設為招待
+      const guest = activeGuests.find(g => g.id === guestId);
+      if (guest) {
+        const newItems = guest.items.map(item => {
+            if (item.orderId === orderId) {
                 if (item.type === 'treat') {
-                    // 回復邏輯：如果是試酒客人，回復為 tasting，否則 sale
                     return { ...item, type: guest.type === 'tasting' ? 'tasting' : 'sale' };
                 } else {
                     return { ...item, type: 'treat' };
                 }
-              }
-              return item;
-            });
-            return { ...guest, items: newItems };
-        }
-        return guest;
-      }));
+            }
+            return item;
+        });
+        dbSet('guests', { ...guest, items: newItems });
+      }
   };
 
   const toggleServedStatus = (guestId, orderId) => {
-    setActiveGuests(prev => prev.map(guest => {
-        if (guest.id === guestId) {
-            const newItems = guest.items.map(item => {
-              if (item.orderId === orderId) { return { ...item, served: !item.served }; }
-              return item;
-            });
-            return { ...guest, items: newItems };
-        }
-        return guest;
-    }));
+    const guest = activeGuests.find(g => g.id === guestId);
+    if (guest) {
+        const newItems = guest.items.map(item => {
+            if (item.orderId === orderId) { return { ...item, served: !item.served }; }
+            return item;
+        });
+        dbSet('guests', { ...guest, items: newItems });
+    }
   };
 
   const updateDiscount = (guestId, amount) => {
-    setActiveGuests(prev => prev.map(guest => guest.id === guestId ? { ...guest, discount: Number(amount) || 0 } : guest));
+    const guest = activeGuests.find(g => g.id === guestId);
+    if (guest) {
+        dbSet('guests', { ...guest, discount: Number(amount) || 0 });
+    }
   };
 
   const handleRemoveFromTab = (guestId, orderId, itemId) => {
     const targetItem = inventory.find(i => i.id === itemId);
     if (targetItem && !targetItem.isKeg) {
-      setInventory(prev => prev.map(i => i.id === itemId ? { ...i, stock: i.stock + 1 } : i));
+        dbSet('inventory', { ...targetItem, stock: targetItem.stock + 1 });
     }
-    setActiveGuests(prev => prev.map(guest => {
-        if (guest.id === guestId) {
-            const newItems = guest.items.filter(item => item.orderId !== orderId);
-            return { ...guest, items: newItems };
-        }
-        return guest;
-    }));
+    const guest = activeGuests.find(g => g.id === guestId);
+    if (guest) {
+        const newItems = guest.items.filter(item => item.orderId !== orderId);
+        dbSet('guests', { ...guest, items: newItems });
+    }
   };
 
   const handleCheckout = (guest) => {
     if (guest.items.length === 0) {
-        setActiveGuests(prev => prev.filter(g => g.id !== guest.id));
+        dbDelete('guests', guest.id);
         setSelectedGuestId(null);
         return;
     }
@@ -544,7 +587,7 @@ export default function App() {
         if (item.isKeg) return { price: 0, profit: 0 }; 
         return { price: 0, profit: -item.cost };
       }
-      if (item.isKeg) return { price: item.price, profit: 0 }; // 修正: 批次商品(餐點/生啤)在交易時不計算損益，只計營收
+      if (item.isKeg) return { price: item.price, profit: 0 }; 
       return { price: item.price, profit: item.price - item.cost };
     };
 
@@ -553,7 +596,6 @@ export default function App() {
       return sum + price;
     }, 0);
 
-    // 計算這張單因為試酒/招待總共扣除了多少成本
     const totalCostDeduction = guest.items.reduce((sum, i) => {
       if ((i.type === 'tasting' || i.type === 'treat') && !i.isKeg) {
         return sum + i.cost;
@@ -571,8 +613,7 @@ export default function App() {
         const transactionId = Date.now();
         const dateStr = new Date().toLocaleDateString();
         const fullTimestamp = new Date().toLocaleString();
-        let newInventory = [...inventory];
-        let newSalesLog = [...salesLog];
+        
         const batchUpdates = {};
         guest.items.forEach(item => {
             if (item.isKeg && item.type === 'sale') {
@@ -581,31 +622,39 @@ export default function App() {
                 batchUpdates[item.id].count += 1;
             }
         });
-        newInventory = newInventory.map(invItem => {
-            if (batchUpdates[invItem.id]) {
-                const update = batchUpdates[invItem.id];
-                return { ...invItem, kegRevenue: (invItem.kegRevenue || 0) + update.revenue, glassesSold: (invItem.glassesSold || 0) + update.count };
+
+        Object.keys(batchUpdates).forEach(invId => {
+            const invItem = inventory.find(i => i.id === Number(invId));
+            if (invItem) {
+                const update = batchUpdates[invId];
+                dbSet('inventory', { 
+                    ...invItem, 
+                    kegRevenue: (invItem.kegRevenue || 0) + update.revenue, 
+                    glassesSold: (invItem.glassesSold || 0) + update.count 
+                });
             }
-            return invItem;
         });
-        setInventory(newInventory);
-        for (const item of guest.items) {
+
+        guest.items.forEach((item, index) => {
             const { price, profit } = calculateItemFinancials(item);
             const saleRecord = {
+                id: transactionId + index, 
                 transactionId, itemId: item.id, name: item.name + (item.selectedAddons?.length ? ` (+${item.selectedAddons.map(a=>a.name).join(',')})` : ''),
                 customerName: guest.name, type: item.type || 'sale', profit, price, date: dateStr, timestamp: fullTimestamp
             };
-            newSalesLog.push(saleRecord);
-        }
+            dbSet('sales', saleRecord);
+        });
+
         if (discount > 0) {
            const discountRecord = {
+                id: transactionId + 999,
                 transactionId, itemId: 'discount', name: '整單折扣', customerName: guest.name,
                 type: 'discount', profit: -discount, price: -discount, date: dateStr, timestamp: fullTimestamp
             };
-            newSalesLog.push(discountRecord);
+            dbSet('sales', discountRecord);
         }
-        setSalesLog(newSalesLog);
-        setActiveGuests(prev => prev.filter(g => g.id !== guest.id));
+
+        dbDelete('guests', guest.id);
         setSelectedGuestId(null);
         showToast(`結帳完成！`, 'success');
         closeConfirm();
@@ -619,12 +668,15 @@ export default function App() {
       onConfirm: () => {
         const itemCounts = {};
         guest.items.forEach(item => { if (!item.isKeg) { itemCounts[item.id] = (itemCounts[item.id] || 0) + 1; } });
-        let newInventory = [...inventory];
+        
         for (const [itemId, count] of Object.entries(itemCounts)) {
-             newInventory = newInventory.map(i => i.id === Number(itemId) ? { ...i, stock: i.stock + count } : i);
+             const invItem = inventory.find(i => i.id === Number(itemId));
+             if (invItem) {
+                 dbSet('inventory', { ...invItem, stock: invItem.stock + count });
+             }
         }
-        setInventory(newInventory);
-        setActiveGuests(prev => prev.filter(g => g.id !== guest.id));
+
+        dbDelete('guests', guest.id);
         setSelectedGuestId(null);
         showToast('訂單已刪除', 'success');
         closeConfirm();
@@ -635,14 +687,17 @@ export default function App() {
   const handleAddManualEntry = (e) => {
     e.preventDefault();
     if(!manualEntry.month || !manualEntry.profit) return;
+    const entryData = { id: Date.now(), month: manualEntry.month, profit: Number(manualEntry.profit) };
+    
     const existing = manualMonthlyData.find(d => d.month === manualEntry.month);
     if (existing) {
-      if(window.confirm('該月份已有手動紀錄，要覆蓋嗎？')) {
-        setManualMonthlyData(prev => prev.map(entry => entry.month === manualEntry.month ? { ...entry, profit: Number(manualEntry.profit) } : entry));
-      }
+        if(window.confirm('該月份已有手動紀錄，要覆蓋嗎？')) {
+             dbSet('manual_monthly', { ...existing, profit: Number(manualEntry.profit) });
+        }
     } else {
-        setManualMonthlyData(prev => [...prev, { month: manualEntry.month, profit: Number(manualEntry.profit), id: Date.now() }]);
+        dbSet('manual_monthly', entryData);
     }
+
     setManualEntry({ month: '', profit: '' });
     showToast('月報表資料已更新');
   };
@@ -664,7 +719,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-sans pb-24 relative overflow-hidden">
-      
       {/* Toast & Modal */}
       {toast && (
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4 ${toast.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
@@ -774,7 +828,9 @@ export default function App() {
         <div className="flex items-center justify-between max-w-md mx-auto">
           <h1 className="text-xl font-bold flex items-center gap-2 text-white"><Beer className="w-6 h-6" />殼 Nutshell.tw</h1>
           <div className="flex items-center gap-2">
-             <div className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-green-900 text-green-200"><span className="font-bold">本機儲存</span></div>
+             <div className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold ${user ? 'bg-green-900 text-green-200' : 'bg-red-900 text-red-200'}`}>
+                {user ? '● 雲端同步中' : '○ 連線中...'}
+             </div>
           </div>
         </div>
       </header>
@@ -885,7 +941,6 @@ export default function App() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            {/* 新增：招待切換按鈕 */}
                             <button 
                                 onClick={() => toggleTreat(selectedGuestId, item.orderId)} 
                                 className={`text-xs px-2 py-1 rounded border transition-colors ${item.type === 'treat' ? 'bg-pink-900 border-pink-500 text-pink-200' : 'bg-gray-800 border-gray-600 text-gray-500 hover:bg-gray-700'}`}
@@ -893,7 +948,6 @@ export default function App() {
                                 招待
                             </button>
 
-                            {/* 價格/試酒切換按鈕 (如果是招待狀態，這裡顯示 $0 並禁用，或者保留顯示原價但劃掉? 這裡選擇顯示 $0 且不可點) */}
                             {item.type === 'treat' ? (
                                 <div className="text-sm font-mono px-2 py-1 rounded border border-pink-900/50 text-pink-500 bg-pink-900/10 flex items-center gap-1 opacity-75">
                                     <Gift size={14}/> $0
@@ -965,7 +1019,6 @@ export default function App() {
 
         {activeTab === 'inventory' && (
           <div className="space-y-4">
-            {/* 新增：匯出按鈕 (Header 區域) */}
             <div className="flex gap-2">
                 <button onClick={() => setIsAdding(!isAdding)} className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all">{isAdding ? '隱藏新增區塊' : <><Plus size={20}/> 新增品項</>}</button>
                 <button onClick={handleExportInventory} className="w-1/3 bg-gray-700 hover:bg-gray-600 text-gray-200 py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all border border-gray-600"><Download size={20}/> 匯出</button>
