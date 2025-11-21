@@ -44,7 +44,11 @@ export default function App() {
   const [addons, setAddons] = useState([]); 
   const [preOrders, setPreOrders] = useState([]); // 預購清單
   const [preOrderModal, setPreOrderModal] = useState(false); // 預購視窗開關
-  const [newPreOrder, setNewPreOrder] = useState({ itemName: '', customerName: '', quantity: 1, price: '', deposit: 0, status: 'pending', expectedDate: '' });
+  // [修正] 補齊品牌、風格、成本等欄位，避免輸入框報錯
+  const [newPreOrder, setNewPreOrder] = useState({ 
+    brand: '', itemName: '', style: '', quantity: 1, cost: '', price: '', 
+    customerName: '', deposit: 0, status: 'pending', expectedDate: '' 
+  });
   
   // --- 使用者狀態 ---
   const [user, setUser] = useState(null);
@@ -1294,8 +1298,7 @@ const handlePreOrderAction = (order, action) => {
             <div className="flex gap-2">
                 <button onClick={() => setIsAdding(!isAdding)} className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all">{isAdding ? '隱藏新增區塊' : <><Plus size={20}/> 新增品項</>}</button>
                 <button onClick={handleExportInventory} className="w-1/3 bg-gray-700 hover:bg-gray-600 text-gray-200 py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all border border-gray-600"><Download size={20}/> 匯出</button>
-            </div>
-            <button onClick={() => setPreOrderModal(true)} className="w-full mt-2 bg-purple-700 hover:bg-purple-600 text-white py-2 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"><Calendar size={20}/> 預購與進貨管理 ({preOrders.filter(p=>p.status==='pending').length})</button>
+            </div>  
 
             {isAdding && (
               <div className="bg-gray-800 p-4 rounded-lg border border-amber-500/50 animate-in fade-in slide-in-from-top-2">
@@ -1430,6 +1433,109 @@ const handlePreOrderAction = (order, action) => {
 
           </div>
         )}
+
+
+        {activeTab === 'preorder' && (
+          <div className="space-y-4 animate-in fade-in">
+            <h2 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                <Calendar size={24} className="text-purple-500"/> 預購與進貨管理
+                <span className="text-xs bg-purple-900 text-purple-200 px-2 py-1 rounded-full">{preOrders.filter(p=>p.status==='pending').length} 筆待處理</span>
+            </h2>
+
+            {/* 新增表單區塊 (使用新版雙欄位排版) */}
+            <div className="bg-gray-800 p-4 rounded-xl border border-purple-500/30 shadow-lg">
+                <h4 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><Plus size={16}/> 新增預購單</h4>
+                <div className="space-y-3">
+                    <div className="flex gap-2">
+                        <div className="w-1/3">
+                            <label className="text-[10px] text-gray-400 block mb-1">品牌</label>
+                            <input placeholder="品牌" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500" value={newPreOrder.brand} onChange={e=>setNewPreOrder({...newPreOrder, brand: e.target.value})}/>
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-[10px] text-gray-400 block mb-1">商品名稱</label>
+                            <input placeholder="例如: IPA" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500" value={newPreOrder.itemName} onChange={e=>setNewPreOrder({...newPreOrder, itemName: e.target.value})}/>
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        <div className="flex-1">
+                            <label className="text-[10px] text-gray-400 block mb-1">風格/備註</label>
+                            <input placeholder="例如: Hazy" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500" value={newPreOrder.style} onChange={e=>setNewPreOrder({...newPreOrder, style: e.target.value})}/>
+                        </div>
+                        <div className="w-1/3">
+                            <label className="text-[10px] text-gray-400 block mb-1">數量</label>
+                            <input type="number" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500" value={newPreOrder.quantity} onChange={e=>setNewPreOrder({...newPreOrder, quantity: e.target.value})}/>
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        <div className="flex-1">
+                            <label className="text-[10px] text-gray-400 block mb-1">預計成本 $</label>
+                            <input type="number" placeholder="0" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500" value={newPreOrder.cost} onChange={e=>setNewPreOrder({...newPreOrder, cost: e.target.value})}/>
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-[10px] text-gray-400 block mb-1">預售價 $</label>
+                            <input type="number" placeholder="0" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500" value={newPreOrder.price} onChange={e=>setNewPreOrder({...newPreOrder, price: e.target.value})}/>
+                        </div>
+                    </div>
+                    <div className="flex gap-2 pt-2 border-t border-gray-700 mt-2">
+                        <div className="flex-1">
+                            <input placeholder="訂購客人 (選填)" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm placeholder-gray-500" value={newPreOrder.customerName} onChange={e=>setNewPreOrder({...newPreOrder, customerName: e.target.value})}/>
+                        </div>
+                        <div className="w-1/3">
+                            <input type="number" placeholder="已收訂金" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm placeholder-gray-500" value={newPreOrder.deposit} onChange={e=>setNewPreOrder({...newPreOrder, deposit: e.target.value})}/>
+                        </div>
+                    </div>
+                    <button onClick={handleAddPreOrder} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-3 rounded-lg font-bold shadow-md">建立預購單</button>
+                </div>
+            </div>
+
+            {/* 列表顯示區塊 */}
+            <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                <div className="p-4 border-b border-gray-700 bg-gray-750">
+                   <h3 className="text-sm font-bold text-gray-300">預購清單 ({preOrders.length})</h3>
+                </div>
+                <div className="divide-y divide-gray-700">
+                    {preOrders.length === 0 ? (
+                        <div className="p-8 text-center text-gray-500 text-sm">目前沒有預購單</div>
+                    ) : (
+                        preOrders.sort((a,b)=> (a.status==='pending'?-1:1)).map(order => (
+                            <div key={order.id} className={`p-4 flex flex-col gap-3 ${order.status === 'pending' ? 'bg-gray-800' : 'bg-gray-900 opacity-50'}`}>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="font-bold text-white text-lg flex items-center gap-2">
+                                            {order.itemName} 
+                                            {order.brand && <span className="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">{order.brand}</span>}
+                                        </div>
+                                        <div className="text-sm text-gray-400 mt-1">
+                                            {order.customerName ? <span className="text-purple-400 font-bold">客訂: {order.customerName}</span> : <span className="text-blue-400">店內進貨</span>}
+                                            {order.deposit > 0 && ` | 已收訂金 $${order.deposit}`}
+                                        </div>
+                                        <div className="text-xs text-gray-500 mt-1 flex gap-2">
+                                            <span>數量: {order.quantity}</span>
+                                            <span>成本: ${order.cost}</span>
+                                            <span>售價: ${order.price}</span>
+                                        </div>
+                                    </div>
+                                    {order.status === 'pending' ? (
+                                        <span className="text-xs bg-yellow-900 text-yellow-200 px-2 py-1 rounded border border-yellow-700">等待中</span>
+                                    ) : (
+                                        <span className="text-xs bg-green-900 text-green-200 px-2 py-1 rounded border border-green-700">已入庫</span>
+                                    )}
+                                </div>
+                                
+                                {order.status === 'pending' && (
+                                    <div className="flex gap-2 pt-2 border-t border-gray-700/50">
+                                        <button onClick={() => handlePreOrderAction(order, 'arrive')} className="flex-1 bg-green-700 hover:bg-green-600 text-white py-2 rounded font-bold text-sm shadow-sm">確認到貨入庫</button>
+                                        <button onClick={() => handlePreOrderAction(order, 'delete')} className="w-12 flex items-center justify-center bg-gray-700 hover:bg-red-900 text-gray-300 hover:text-white rounded border border-gray-600"><Trash2 size={18}/></button>
+                                    </div>
+                                )}
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+          </div>
+        )}
+
 
         {activeTab === 'stats' && (
           <div className="space-y-4 animate-in fade-in">
@@ -1761,61 +1867,12 @@ const handlePreOrderAction = (order, action) => {
         <div className="max-w-md mx-auto flex justify-around items-center h-16">
           <button onClick={() => { setActiveTab('pos'); setSelectedGuestId(null); }} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'pos' ? 'text-amber-500' : 'text-gray-500'}`}><Users size={24} /><span className="text-[10px] font-bold">客人/結帳</span></button>
           <button onClick={() => setActiveTab('inventory')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'inventory' ? 'text-amber-500' : 'text-gray-500'}`}><Beer size={24} /><span className="text-[10px] font-bold">庫存管理</span></button>
+          <button onClick={() => setActiveTab('preorder')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'preorder' ? 'text-purple-500' : 'text-gray-500'}`}><Calendar size={24} /><span className="text-[10px] font-bold">預購</span></button>
           <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'stats' ? 'text-amber-500' : 'text-gray-500'}`}><BarChart3 size={24} /><span className="text-[10px] font-bold">獲利報表</span></button>
         </div>
       </nav>
 
-      {/* [新增] 8. 預購管理 Modal (放在 return 的最下方，但在 </div> 之前) */}
-{preOrderModal && (
-<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in">
-    <div className="bg-gray-800 w-11/12 max-w-md rounded-2xl p-6 border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto">
-        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Calendar size={24} className="text-purple-500"/> 預購管理</h3>
-        
-        {/* 新增表單 */}
-        <div className="bg-gray-700/50 p-4 rounded-xl mb-6 space-y-3">
-            <h4 className="text-sm font-bold text-gray-300">新增預購/待進貨</h4>
-            <div className="flex gap-2">
-                <input placeholder="商品名稱" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.itemName} onChange={e=>setNewPreOrder({...newPreOrder, itemName: e.target.value})}/>
-                <input placeholder="客人(選填)" className="w-1/3 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.customerName} onChange={e=>setNewPreOrder({...newPreOrder, customerName: e.target.value})}/>
-            </div>
-            <div className="flex gap-2">
-                <input type="number" placeholder="數量" className="w-1/4 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.quantity} onChange={e=>setNewPreOrder({...newPreOrder, quantity: e.target.value})}/>
-                <input type="number" placeholder="預售價" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.price} onChange={e=>setNewPreOrder({...newPreOrder, price: e.target.value})}/>
-                <input type="number" placeholder="已收訂金" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.deposit} onChange={e=>setNewPreOrder({...newPreOrder, deposit: e.target.value})}/>
-            </div>
-             <button onClick={handleAddPreOrder} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-2 rounded-lg font-bold">建立預購單</button>
-        </div>
 
-        {/* 列表 */}
-        <div className="space-y-3">
-            {preOrders.sort((a,b)=> (a.status==='pending'?-1:1)).map(order => (
-                <div key={order.id} className={`p-3 rounded-lg border flex justify-between items-center ${order.status === 'pending' ? 'bg-gray-800 border-gray-600' : 'bg-gray-900 border-gray-800 opacity-60'}`}>
-                    <div>
-                        <div className="font-bold text-white flex items-center gap-2">
-                            {order.itemName} <span className="text-xs bg-gray-700 px-2 rounded">x{order.quantity}</span>
-                        </div>
-                        <div className="text-xs text-gray-400 mt-1">
-                            {order.customerName ? <span className="text-purple-400">客訂: {order.customerName}</span> : <span className="text-blue-400">店內進貨</span>}
-                            {order.deposit > 0 && ` | 已收訂金 $${order.deposit}`}
-                        </div>
-                    </div>
-                    <div className="flex gap-2">
-                        {order.status === 'pending' ? (
-                            <>
-                            <button onClick={() => handlePreOrderAction(order, 'arrive')} className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-1.5 rounded">到貨入庫</button>
-                            <button onClick={() => handlePreOrderAction(order, 'delete')} className="text-gray-500 hover:text-red-400"><Trash2 size={18}/></button>
-                            </>
-                        ) : (
-                            <span className="text-xs text-green-500 font-bold border border-green-900 bg-green-900/20 px-2 py-1 rounded">已完成</span>
-                        )}
-                    </div>
-                </div>
-            ))}
-        </div>
-        <button onClick={() => setPreOrderModal(false)} className="w-full mt-4 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl font-bold">關閉視窗</button>
-    </div>
-</div>
-)}
     </div>
   );
 }
