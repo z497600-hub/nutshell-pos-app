@@ -42,6 +42,9 @@ export default function App() {
   const [expenses, setExpenses] = useState([]); 
   const [activeGuests, setActiveGuests] = useState([]); 
   const [addons, setAddons] = useState([]); 
+  const [preOrders, setPreOrders] = useState([]); // 預購清單
+  const [preOrderModal, setPreOrderModal] = useState(false); // 預購視窗開關
+  const [newPreOrder, setNewPreOrder] = useState({ itemName: '', customerName: '', quantity: 1, price: '', deposit: 0, status: 'pending', expectedDate: '' });
   
   // --- 使用者狀態 ---
   const [user, setUser] = useState(null);
@@ -75,7 +78,7 @@ export default function App() {
   const [toast, setToast] = useState(null); 
   const [expandedDates, setExpandedDates] = useState({});
   const [expandedTrans, setExpandedTrans] = useState({});
-  const [manualEntry, setManualEntry] = useState({ month: '', profit: '' });
+  const [manualEntry, setManualEntry] = useState({ month: '', profit: '', count: '', avg: '' });
 
   // --- Firebase Authentication & Sync ---
   useEffect(() => {
@@ -121,7 +124,8 @@ export default function App() {
         subscribe('guests', setActiveGuests),
         subscribe('expenses', setExpenses),
         subscribe('manual_monthly', setManualMonthlyData),
-        subscribe('addons', setAddons)
+        subscribe('addons', setAddons),
+        subscribe('pre_orders', setPreOrders),
     ];
     
     return () => unsubs.forEach(unsub => unsub());
@@ -339,110 +343,101 @@ export default function App() {
       .slice(-12);
   }, [salesLog, manualMonthlyData, expenses]);
 
-  // --- 新增：來客數統計 ---
-  const customerStats = useMemo(() => {
-    const counts = {};
-    const today = new Date();
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(today.getDate() - 30);
+ // --- [修改] 3. 更新來客數統計 (支援手動數據) ---
+const customerStats = useMemo(() => {
+  const counts = {};
+  // A. 系統自動計算
+  salesLog.forEach(sale => {
+      const d = new Date(sale.timestamp);
+      if(isNaN(d.getTime())) return;
+      const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
-    salesLog.forEach(sale => {
-        const d = new Date(sale.timestamp);
-        if(isNaN(d.getTime())) return;
+      if (customerChartUnit === 'month') {
+           if (!counts[mKey]) counts[mKey] = { count: new Set(), manual: 0 };
+           counts[mKey].count.add(sale.transactionId);
+      } else {
+           if (selectedMonth) {
+               if (mKey === selectedMonth) {
+                   if (!counts[dKey]) counts[dKey] = { count: new Set(), manual: 0 };
+                   counts[dKey].count.add(sale.transactionId);
+               }
+           } else {
+               // 近30日邏輯... (略，保持原樣或簡化)
+               const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+               if (d >= thirtyDaysAgo) {
+                   if (!counts[dKey]) counts[dKey] = { count: new Set(), manual: 0 };
+                   counts[dKey].count.add(sale.transactionId);
+               }
+           }
+      }
+  });
 
-        const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  // B. 融合手動數據 (僅針對月檢視)
+  if (customerChartUnit === 'month') {
+      manualMonthlyData.forEach(entry => {
+          if (entry.count) {
+              if (!counts[entry.month]) counts[entry.month] = { count: new Set(), manual: 0 };
+              counts[entry.month].manual += Number(entry.count);
+          }
+      });
+  }
 
-        // 單位：月
-        if (customerChartUnit === 'month') {
-             if (!counts[mKey]) counts[mKey] = new Set();
-             counts[mKey].add(sale.transactionId);
-        } else {
-             // 單位：日 (需判斷是否選擇月份)
-             if (selectedMonth) {
-                 if (mKey === selectedMonth) {
-                     if (!counts[dKey]) counts[dKey] = new Set();
-                     counts[dKey].add(sale.transactionId);
-                 }
-             } else {
-                 // 沒選月份，預設顯示最近30天
-                 if (d >= thirtyDaysAgo) {
-                     if (!counts[dKey]) counts[dKey] = new Set();
-                     counts[dKey].add(sale.transactionId);
-                 }
-             }
-        }
-    });
+  return Object.entries(counts)
+      .map(([date, data]) => ({ date, count: data.count.size + (data.manual || 0) }))
+      .sort((a, b) => b.date.localeCompare(a.date)); // 降序排列
+}, [salesLog, customerChartUnit, selectedMonth, manualMonthlyData]);
 
-    return Object.entries(counts)
-        .map(([date, set]) => ({ date, count: set.size }))
-        .sort((a, b) => b.date.localeCompare(a.date));
-  }, [salesLog, customerChartUnit, selectedMonth]);
+// --- [修改] 4. 更新客單價統計 (支援手動數據) ---
+const avgSpendingStats = useMemo(() => {
+  // 若為月檢視，我們改為顯示「手動輸入的平均客單」或「當月總營收/總人數」
+  if (customerChartUnit === 'month') {
+      const monthlyAvgs = monthlyData.map(m => {
+          // 找出手動設定的客單價
+          const manualRec = manualMonthlyData.find(man => man.month === m.month);
+          let finalAvg = 0;
+          
+          // 如果有手動設定客單，優先使用
+          if (manualRec && manualRec.avg) {
+              finalAvg = Number(manualRec.avg);
+          } else {
+              // 否則用系統計算 (需找到該月人數)
+              const custData = customerStats.find(c => c.date === m.month);
+              const count = custData ? custData.count : 1;
+              finalAvg = count > 0 ? Math.round(m.revenue / count) : 0;
+          }
+          return { date: m.month, avg: finalAvg };
+      });
+      return monthlyAvgs.sort((a, b) => b.date.localeCompare(a.date));
+  }
 
-  // --- 新增：客單價統計 ---
-  const avgSpendingStats = useMemo(() => {
-    const stats = {};
-    const today = new Date();
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(today.getDate() - 30);
+  // 以下維持原本的「日檢視」邏輯
+  const stats = {};
+  const today = new Date();
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
 
-    salesLog.forEach(sale => {
-        const d = new Date(sale.timestamp);
-        if(isNaN(d.getTime())) return;
+  salesLog.forEach(sale => {
+      const d = new Date(sale.timestamp);
+      if(isNaN(d.getTime())) return;
+      const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
-        const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      if (selectedMonth) { if (mKey !== selectedMonth) return; } 
+      else { if (d < thirtyDaysAgo) return; }
+      
+      if (!stats[dKey]) stats[dKey] = { revenue: 0, transactions: new Set() };
+      stats[dKey].revenue += sale.price;
+      stats[dKey].transactions.add(sale.transactionId);
+  });
 
-        // 僅在日模式下顯示
-        if (selectedMonth) {
-             if (mKey !== selectedMonth) return;
-        } else {
-             if (d < thirtyDaysAgo) return;
-        }
-        
-        if (!stats[dKey]) stats[dKey] = { revenue: 0, transactions: new Set() };
-        stats[dKey].revenue += sale.price;
-        stats[dKey].transactions.add(sale.transactionId);
-    });
-
-    return Object.entries(stats)
-        .map(([date, data]) => ({
-            date,
-            avg: data.transactions.size > 0 ? Math.round(data.revenue / data.transactions.size) : 0
-        }))
-        .sort((a, b) => b.date.localeCompare(a.date));
-  }, [salesLog, selectedMonth]);
-
-  const dailyStats = useMemo(() => {
-    if (!selectedMonth) return [];
-    const days = {};
-    
-    salesLog.forEach(sale => {
-        if (!sale.timestamp) return;
-        const dateObj = new Date(sale.timestamp);
-        if (isNaN(dateObj.getTime())) return; 
-        const monthKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
-        
-        if (monthKey === selectedMonth) {
-            const dayKey = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
-            if (!days[dayKey]) days[dayKey] = { date: dayKey, revenue: 0, profit: 0, count: 0 };
-            
-            days[dayKey].revenue += sale.price;
-            days[dayKey].profit += sale.profit;
-            days[dayKey].count += 1;
-        }
-    });
-
-    expenses.forEach(exp => {
-        if (!exp.date) return;
-        if (exp.date.startsWith(selectedMonth)) {
-             if (!days[exp.date]) days[exp.date] = { date: exp.date, revenue: 0, profit: 0, count: 0 };
-             days[exp.date].profit -= exp.amount;
-        }
-    });
-
-    return Object.values(days).sort((a, b) => b.date.localeCompare(a.date));
-  }, [selectedMonth, salesLog, expenses]);
+  return Object.entries(stats)
+      .map(([date, data]) => ({
+          date,
+          avg: data.transactions.size > 0 ? Math.round(data.revenue / data.transactions.size) : 0
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+}, [salesLog, selectedMonth, customerChartUnit, monthlyData, manualMonthlyData, customerStats]);
 
   // --- 業務邏輯 (寫入 Firestore) ---
   const handleAddItem = (e) => {
@@ -867,23 +862,85 @@ export default function App() {
     });
   };
 
-  const handleAddManualEntry = (e) => {
-    e.preventDefault();
-    if(!manualEntry.month || !manualEntry.profit) return;
-    const entryData = { id: Date.now(), month: manualEntry.month, profit: Number(manualEntry.profit) };
-    
-    const existing = manualMonthlyData.find(d => d.month === manualEntry.month);
-    if (existing) {
-        if(window.confirm('該月份已有手動紀錄，要覆蓋嗎？')) {
-             dbSet('manual_monthly', { ...existing, profit: Number(manualEntry.profit) });
-        }
-    } else {
-        dbSet('manual_monthly', entryData);
-    }
-
-    setManualEntry({ month: '', profit: '' });
-    showToast('月報表資料已更新');
+// --- [修改] 5. 更新手動資料輸入函式 (取代原本的 handleAddManualEntry) ---
+const handleAddManualEntry = (e) => {
+  e.preventDefault();
+  if(!manualEntry.month) return;
+  // 允許只輸入其中一項
+  
+  const entryData = { 
+      id: Date.now(), 
+      month: manualEntry.month, 
+      profit: Number(manualEntry.profit) || 0,
+      count: Number(manualEntry.count) || 0,
+      avg: Number(manualEntry.avg) || 0
   };
+  
+  const existing = manualMonthlyData.find(d => d.month === manualEntry.month);
+  if (existing) {
+      if(window.confirm(`該月份 (${manualEntry.month}) 已有紀錄，要覆蓋嗎？`)) {
+           // 保留原本沒改到的欄位，只更新有輸入的
+           const newProfit = manualEntry.profit ? Number(manualEntry.profit) : existing.profit;
+           const newCount = manualEntry.count ? Number(manualEntry.count) : (existing.count || 0);
+           const newAvg = manualEntry.avg ? Number(manualEntry.avg) : (existing.avg || 0);
+           
+           dbSet('manual_monthly', { ...existing, profit: newProfit, count: newCount, avg: newAvg });
+      }
+  } else {
+      dbSet('manual_monthly', entryData);
+  }
+
+  setManualEntry({ month: '', profit: '', count: '', avg: '' });
+  showToast('月報表數據已更新');
+};
+
+// --- [新增] 6. 預購管理函式 ---
+const handleAddPreOrder = () => {
+    if (!newPreOrder.itemName) return;
+    const itemData = {
+        id: Date.now(),
+        ...newPreOrder,
+        createdAt: new Date().toISOString()
+    };
+    dbSet('pre_orders', itemData);
+    setNewPreOrder({ itemName: '', customerName: '', quantity: 1, price: '', deposit: 0, status: 'pending', expectedDate: '' });
+    showToast('預購單已建立');
+};
+
+const handlePreOrderAction = (order, action) => {
+    if (action === 'delete') {
+        if(window.confirm('確定刪除此預購單？')) dbDelete('pre_orders', order.id);
+        return;
+    }
+    if (action === 'arrive') {
+        // 到貨：轉入庫存
+        setConfirmModal({
+            isOpen: true, title: '預購到貨入庫',
+            message: `將「${order.itemName}」轉入庫存嗎？\n數量: ${order.quantity}`,
+            isDanger: false,
+            onConfirm: () => {
+                // 1. 新增到庫存
+                const inventoryItem = {
+                    id: Date.now(),
+                    name: order.itemName,
+                    brand: '預購轉入',
+                    style: order.customerName ? `客訂: ${order.customerName}` : '店內預購',
+                    cost: 0, // 需手動補成本
+                    price: Number(order.price) || 0,
+                    stock: Number(order.quantity),
+                    category: 'drink', isKeg: false, createdAt: new Date().toISOString()
+                };
+                dbSet('inventory', inventoryItem);
+                
+                // 2. 更新預購單狀態為已完成
+                dbSet('pre_orders', { ...order, status: 'arrived' });
+                
+                showToast('商品已入庫，預購單已結案');
+                closeConfirm();
+            }
+        });
+    }
+};
 
   // --- 計算總計 ---
   const totalInventoryValue = inventory.reduce((acc, item) => acc + (item.cost * item.stock), 0);
@@ -1238,7 +1295,8 @@ export default function App() {
                 <button onClick={() => setIsAdding(!isAdding)} className="flex-1 bg-amber-600 hover:bg-amber-500 text-white py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all">{isAdding ? '隱藏新增區塊' : <><Plus size={20}/> 新增品項</>}</button>
                 <button onClick={handleExportInventory} className="w-1/3 bg-gray-700 hover:bg-gray-600 text-gray-200 py-3 rounded-lg flex items-center justify-center gap-2 font-bold shadow-md active:scale-95 transition-all border border-gray-600"><Download size={20}/> 匯出</button>
             </div>
-            
+            <button onClick={() => setPreOrderModal(true)} className="w-full mt-2 bg-purple-700 hover:bg-purple-600 text-white py-2 rounded-lg font-bold shadow-md flex items-center justify-center gap-2"><Calendar size={20}/> 預購與進貨管理 ({preOrders.filter(p=>p.status==='pending').length})</button>
+
             {isAdding && (
               <div className="bg-gray-800 p-4 rounded-lg border border-amber-500/50 animate-in fade-in slide-in-from-top-2">
                 <div className="mb-3">
@@ -1615,20 +1673,29 @@ export default function App() {
                 )}
 
                 <div className="bg-gray-800 p-4 rounded-xl border border-gray-700">
-                  <h2 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><Calendar size={16}/> 手動補登過往淨利</h2>
-                  <p className="text-xs text-gray-500 mb-3">可在此輸入之前的備忘錄紀錄，將會整合至上方圖表。</p>
-                  <div className="flex gap-2 items-end">
-                    <div className="flex-1">
-                      <label className="text-[10px] text-gray-400 mb-1 block">月份 (YYYY-MM)</label>
-                      <input type="month" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white text-sm" value={manualEntry.month} onChange={e => setManualEntry({...manualEntry, month: e.target.value})}/>
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-[10px] text-gray-400 mb-1 block">淨利金額</label>
-                      <input type="number" placeholder="例如: 5000" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white text-sm" value={manualEntry.profit} onChange={e => setManualEntry({...manualEntry, profit: e.target.value})}/>
-                    </div>
-                    <button onClick={handleAddManualEntry} className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded h-[38px] w-[38px] flex items-center justify-center"><Plus size={20}/></button>
-                  </div>
-                </div>
+  <h2 className="text-sm font-bold text-gray-300 mb-3 flex items-center gap-2"><Edit3 size={16}/> 手動調整/補登報表數據</h2>
+  <p className="text-xs text-gray-500 mb-3">輸入月份後，可單獨更新「淨利」、「人數」或「平均客單」。(不輸入的欄位將保持原樣)</p>
+  
+  <div className="space-y-2">
+      <div className="flex items-center gap-2">
+          <label className="w-16 text-xs text-gray-400">月份</label>
+          <input type="month" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white text-sm" value={manualEntry.month} onChange={e => setManualEntry({...manualEntry, month: e.target.value})}/>
+      </div>
+      <div className="flex items-center gap-2">
+          <label className="w-16 text-xs text-gray-400">淨利 $</label>
+          <input type="number" placeholder="選填" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white text-sm" value={manualEntry.profit} onChange={e => setManualEntry({...manualEntry, profit: e.target.value})}/>
+      </div>
+      <div className="flex items-center gap-2">
+           <label className="w-16 text-xs text-gray-400">來客數</label>
+           <input type="number" placeholder="選填" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white text-sm" value={manualEntry.count} onChange={e => setManualEntry({...manualEntry, count: e.target.value})}/>
+      </div>
+      <div className="flex items-center gap-2">
+           <label className="w-16 text-xs text-gray-400">平均客單</label>
+           <input type="number" placeholder="選填" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white text-sm" value={manualEntry.avg} onChange={e => setManualEntry({...manualEntry, avg: e.target.value})}/>
+      </div>
+      <button onClick={handleAddManualEntry} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded font-bold mt-2">更新數據</button>
+  </div>
+</div>
               </div>
             )}
 
@@ -1697,6 +1764,58 @@ export default function App() {
           <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'stats' ? 'text-amber-500' : 'text-gray-500'}`}><BarChart3 size={24} /><span className="text-[10px] font-bold">獲利報表</span></button>
         </div>
       </nav>
+
+      {/* [新增] 8. 預購管理 Modal (放在 return 的最下方，但在 </div> 之前) */}
+{preOrderModal && (
+<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm animate-in fade-in">
+    <div className="bg-gray-800 w-11/12 max-w-md rounded-2xl p-6 border border-gray-700 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2"><Calendar size={24} className="text-purple-500"/> 預購管理</h3>
+        
+        {/* 新增表單 */}
+        <div className="bg-gray-700/50 p-4 rounded-xl mb-6 space-y-3">
+            <h4 className="text-sm font-bold text-gray-300">新增預購/待進貨</h4>
+            <div className="flex gap-2">
+                <input placeholder="商品名稱" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.itemName} onChange={e=>setNewPreOrder({...newPreOrder, itemName: e.target.value})}/>
+                <input placeholder="客人(選填)" className="w-1/3 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.customerName} onChange={e=>setNewPreOrder({...newPreOrder, customerName: e.target.value})}/>
+            </div>
+            <div className="flex gap-2">
+                <input type="number" placeholder="數量" className="w-1/4 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.quantity} onChange={e=>setNewPreOrder({...newPreOrder, quantity: e.target.value})}/>
+                <input type="number" placeholder="預售價" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.price} onChange={e=>setNewPreOrder({...newPreOrder, price: e.target.value})}/>
+                <input type="number" placeholder="已收訂金" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none" value={newPreOrder.deposit} onChange={e=>setNewPreOrder({...newPreOrder, deposit: e.target.value})}/>
+            </div>
+             <button onClick={handleAddPreOrder} className="w-full bg-purple-600 hover:bg-purple-500 text-white py-2 rounded-lg font-bold">建立預購單</button>
+        </div>
+
+        {/* 列表 */}
+        <div className="space-y-3">
+            {preOrders.sort((a,b)=> (a.status==='pending'?-1:1)).map(order => (
+                <div key={order.id} className={`p-3 rounded-lg border flex justify-between items-center ${order.status === 'pending' ? 'bg-gray-800 border-gray-600' : 'bg-gray-900 border-gray-800 opacity-60'}`}>
+                    <div>
+                        <div className="font-bold text-white flex items-center gap-2">
+                            {order.itemName} <span className="text-xs bg-gray-700 px-2 rounded">x{order.quantity}</span>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">
+                            {order.customerName ? <span className="text-purple-400">客訂: {order.customerName}</span> : <span className="text-blue-400">店內進貨</span>}
+                            {order.deposit > 0 && ` | 已收訂金 $${order.deposit}`}
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        {order.status === 'pending' ? (
+                            <>
+                            <button onClick={() => handlePreOrderAction(order, 'arrive')} className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-1.5 rounded">到貨入庫</button>
+                            <button onClick={() => handlePreOrderAction(order, 'delete')} className="text-gray-500 hover:text-red-400"><Trash2 size={18}/></button>
+                            </>
+                        ) : (
+                            <span className="text-xs text-green-500 font-bold border border-green-900 bg-green-900/20 px-2 py-1 rounded">已完成</span>
+                        )}
+                    </div>
+                </div>
+            ))}
+        </div>
+        <button onClick={() => setPreOrderModal(false)} className="w-full mt-4 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-xl font-bold">關閉視窗</button>
+    </div>
+</div>
+)}
     </div>
   );
 }
