@@ -1013,18 +1013,18 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
 };
 
 
-// --- 計算總計 ---  <--- 這是第 926 行 (不要蓋掉它)
-const totalInventoryValue = inventory.reduce((acc, item) => acc + (item.cost * item.stock), 0);
-
-  // --- 計算總計 ---
+// --- 計算總計 ---  <--- 這是第 926 行 (保留)
   const totalInventoryValue = inventory.reduce((acc, item) => acc + (item.cost * item.stock), 0);
+
+  // --- 下面這裡原本有一行重複的 totalInventoryValue，已經刪除了 ---
+  
   const totalRevenue = salesLog.reduce((acc, sale) => acc + (sale.price || 0), 0);
   const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
   const totalRealizedProfit = salesLog.reduce((acc, sale) => acc + sale.profit, 0) - totalExpenses;
   
   const currentGuest = activeGuests.find(g => g.id === selectedGuestId);
   const currentGuestSubtotal = currentGuest ? currentGuest.items.reduce((sum, item) => {
-     return sum + (item.type === 'tasting' || item.type === 'treat' ? 0 : item.price);
+      return sum + (item.type === 'tasting' || item.type === 'treat' ? 0 : item.price);
   }, 0) : 0;
   const currentGuestTotal = Math.max(0, currentGuestSubtotal - (currentGuest?.discount || 0));
 
