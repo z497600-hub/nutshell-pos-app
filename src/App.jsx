@@ -1393,10 +1393,30 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
                     <input placeholder="風格/備註" className="w-1/2 bg-gray-900 border border-gray-700 p-2 rounded text-white outline-none" value={newItem.style} onChange={e => setNewItem({...newItem, style: e.target.value})}/>
                     {!newItem.isKeg && newItem.category !== 'food' && (<input type="number" placeholder="庫存" className="w-1/2 bg-gray-900 border border-gray-700 p-2 rounded text-white outline-none" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})}/>)}
                   </div>
-                  <div className="flex gap-2">
-                    <input type="number" placeholder={newItem.isKeg || newItem.category === 'food' ? "整批/桶成本 $" : "單瓶成本 $"} className="w-1/2 bg-gray-900 border border-gray-700 p-2 rounded text-white outline-none" value={newItem.cost} onChange={e => setNewItem({...newItem, cost: e.target.value})}/>
-                    <input type="number" placeholder="售價 $" className="w-1/2 bg-gray-900 border border-gray-700 p-2 rounded text-white outline-none" value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})}/>
-                  </div>
+                  {/* [修正] 將輸入框與按鈕分行，解決手機版高度異常問題 */}
+                    <div className="flex gap-2">
+                        <input 
+                            type="number" 
+                            placeholder="預計成本" 
+                            className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" 
+                            value={newPreOrder.cost} 
+                            onChange={e=>setNewPreOrder({...newPreOrder, cost: e.target.value})}
+                        />
+                        <input 
+                            type="number" 
+                            placeholder="預售價" 
+                            className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" 
+                            value={newPreOrder.price} 
+                            onChange={e=>setNewPreOrder({...newPreOrder, price: e.target.value})}
+                        />
+                    </div>
+                    
+                    <button 
+                        onClick={handleAddPreOrder} 
+                        className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 rounded font-bold text-sm border border-gray-600 flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
+                    >
+                        <Plus size={16} /> 加入庫存池
+                    </button>
                   <button onClick={handleAddItem} className="w-full bg-green-600 hover:bg-green-500 text-white py-2 rounded font-bold flex items-center justify-center gap-2"><Save size={16}/> 儲存入庫 (可連續輸入)</button>
                 </div>
               </div>
