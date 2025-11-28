@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, Beer, DollarSign, BarChart3, Users, History, Save, AlertCircle, ChevronLeft, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, ChevronsUp, Download, Gift, Wine, Calendar, ClipboardList, Zap, Droplet, Wifi, FileText, Archive, Percent, Settings, Edit3, Utensils, Bell, BellRing, X, User, Briefcase, Database, TrendingUp, Banknote } from 'lucide-react';
+import { Plus, Trash2, Beer, DollarSign, BarChart3, Users, History, Save, AlertCircle, ChevronLeft, CheckCircle, XCircle, AlertTriangle, ChevronDown, ChevronUp, ChevronsUp, Download, Gift, Wine, Calendar, ClipboardList, Zap, Droplet, Wifi, FileText, Archive, Percent, Settings, Edit3, Utensils, Bell, BellRing, X, User, Briefcase, Database, TrendingUp, Banknote, Minus, Layers } from 'lucide-react';
 
 // --- Firebase Imports ---
 import { initializeApp } from 'firebase/app';
@@ -43,13 +43,10 @@ export default function App() {
   const [activeGuests, setActiveGuests] = useState([]); 
   const [addons, setAddons] = useState([]); 
   const [preOrders, setPreOrders] = useState([]); // 預購清單
-  const [preOrderModal, setPreOrderModal] = useState(false); // 預購視窗開關
-  // [修正] 補齊品牌、風格、成本等欄位，避免輸入框報錯
   const [newPreOrder, setNewPreOrder] = useState({ 
     brand: '', itemName: '', style: '', quantity: 1, cost: '', price: '', 
     customerName: '', deposit: 0, status: 'pending', expectedDate: '' 
   });
-  // [新增] 目前正在幫誰輸入預購單 (空值代表店內進貨)
   const [currentPreOrderTarget, setCurrentPreOrderTarget] = useState('');
   
   // --- 使用者狀態 ---
@@ -59,7 +56,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('pos');
   const [statsSubTab, setStatsSubTab] = useState('overview');
   const [selectedMonth, setSelectedMonth] = useState(null);
-  const [customerChartUnit, setCustomerChartUnit] = useState('day'); // 'day' or 'month' for customer count chart
+  const [customerChartUnit, setCustomerChartUnit] = useState('day'); 
 
   // --- 操作狀態 ---
   const [selectedGuestId, setSelectedGuestId] = useState(null); 
@@ -71,6 +68,8 @@ export default function App() {
   const [newExpense, setNewExpense] = useState({ category: '其他', amount: '', date: new Date().toISOString().split('T')[0], note: '' });
   const [customCategory, setCustomCategory] = useState('');
   const [expandedBrands, setExpandedBrands] = useState({}); 
+  // [新增] 庫存管理頁面的品牌展開狀態
+  const [expandedInventoryBrands, setExpandedInventoryBrands] = useState({});
 
   // --- Modal 狀態 ---
   const [foodModal, setFoodModal] = useState({ isOpen: false, item: null, addons: [] });
@@ -110,19 +109,14 @@ export default function App() {
   // 監聽資料庫變動
   useEffect(() => {
     if (!user) return;
-
     const subscribe = (collectionName, setter) => {
         const colRef = collection(db, 'artifacts', appId, 'public', 'data', collectionName);
         const q = query(colRef);
-        
         return onSnapshot(q, (snapshot) => {
             const data = snapshot.docs.map(doc => ({ ...doc.data(), id: isNaN(Number(doc.id)) ? doc.id : Number(doc.id) }));
             setter(data);
-        }, (error) => {
-            console.error(`Sync error for ${collectionName}:`, error);
-        });
+        }, (error) => { console.error(`Sync error for ${collectionName}:`, error); });
     };
-
     const unsubs = [
         subscribe('inventory', setInventory),
         subscribe('history', setProductHistory),
@@ -133,10 +127,8 @@ export default function App() {
         subscribe('addons', setAddons),
         subscribe('pre_orders', setPreOrders),
     ];
-    
     return () => unsubs.forEach(unsub => unsub());
   }, [user]);
-
 
   // --- Helper: Write to Firestore ---
   const dbSet = async (coll, data) => {
@@ -177,8 +169,24 @@ export default function App() {
     setExpandedBrands(prev => ({ ...prev, [brand]: !prev[brand] }));
   };
 
+  // [新增] 庫存管理頁面的品牌收折
+  const toggleInventoryBrand = (brand) => {
+    setExpandedInventoryBrands(prev => ({ ...prev, [brand]: !prev[brand] }));
+  };
+
   const handleCollapseAll = () => {
     setExpandedBrands({});
+  };
+
+  // [新增] 庫存管理頁面的全部收折/展開
+  const handleInventoryCollapseAll = (shouldCollapse) => {
+     if (shouldCollapse) {
+         setExpandedInventoryBrands({});
+     } else {
+         const allBrands = {};
+         Object.keys(groupedInventory).forEach(b => allBrands[b] = true);
+         setExpandedInventoryBrands(allBrands);
+     }
   };
 
   const formatDate = (isoString) => {
@@ -200,10 +208,7 @@ export default function App() {
   };
 
   const exportToCSV = (data, filename) => {
-    if (!data || data.length === 0) {
-        showToast('沒有資料可匯出', 'error');
-        return;
-    }
+    if (!data || data.length === 0) { showToast('沒有資料可匯出', 'error'); return; }
     const csvContent = "\uFEFF" + [
       Object.keys(data[0] || {}).join(","), 
       ...data.map(row => Object.values(row).map(val => `"${val}"`).join(","))
@@ -234,19 +239,11 @@ export default function App() {
     showToast('庫存表已匯出');
   };
 
-  // 2. 系統備份功能 (匯出 JSON)
   const handleSystemBackup = () => {
     const backupData = {
         timestamp: new Date().toISOString(),
-        inventory,
-        productHistory,
-        salesLog,
-        manualMonthlyData,
-        expenses,
-        activeGuests,
-        addons
+        inventory, productHistory, salesLog, manualMonthlyData, expenses, activeGuests, addons
     };
-
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
@@ -257,12 +254,19 @@ export default function App() {
     showToast('系統備份檔已下載');
   };
 
-  // 分類庫存
-  const bottleInventory = inventory.filter(i => !i.isKeg && (!i.category || i.category === 'drink'));
-  const kegInventory = inventory.filter(i => i.isKeg && (!i.category || i.category === 'drink'));
-  const foodInventory = inventory.filter(i => i.category === 'food');
-
   // --- 資料計算邏輯 ---
+  const bottleInventory = useMemo(() => 
+    inventory.filter(i => !i.isKeg && (!i.category || i.category === 'drink')), 
+  [inventory]);
+
+  const kegInventory = useMemo(() => 
+    inventory.filter(i => i.isKeg && (!i.category || i.category === 'drink')), 
+  [inventory]);
+
+  const foodInventory = useMemo(() => 
+    inventory.filter(i => i.category === 'food'), 
+  [inventory]);
+
   const groupedDrinks = useMemo(() => {
     const drinks = [...bottleInventory, ...kegInventory];
     const groups = {};
@@ -274,6 +278,17 @@ export default function App() {
     return groups;
   }, [bottleInventory, kegInventory]);
 
+  // [新增] 專為庫存管理頁面設計的分組 (僅瓶裝)
+  const groupedInventory = useMemo(() => {
+    const groups = {};
+    bottleInventory.forEach(item => {
+      const brand = item.brand ? item.brand.trim() : '其他品牌';
+      if (!groups[brand]) groups[brand] = [];
+      groups[brand].push(item);
+    });
+    return groups;
+  }, [bottleInventory]);
+
   const sortedBrands = useMemo(() => {
     return Object.keys(groupedDrinks).sort((a, b) => {
         if (a === '其他品牌') return 1;
@@ -282,67 +297,57 @@ export default function App() {
     });
   }, [groupedDrinks]);
 
+    // [新增] 庫存管理用的排序品牌
+  const sortedInventoryBrands = useMemo(() => {
+    return Object.keys(groupedInventory).sort((a, b) => {
+        if (a === '其他品牌') return 1;
+        if (b === '其他品牌') return -1;
+        return a.localeCompare(b);
+    });
+  }, [groupedInventory]);
+
   const groupedSales = useMemo(() => {
     const groups = {}; 
     salesLog.forEach(sale => {
       let dateStr = sale.date || (sale.timestamp ? sale.timestamp.split(' ')[0] : 'Unknown'); 
       const transId = sale.transactionId || `${sale.timestamp}-${sale.customerName}`;
-
       if (!groups[dateStr]) groups[dateStr] = { date: dateStr, totalRevenue: 0, transactions: {} };
-      
       if (!groups[dateStr].transactions[transId]) {
         groups[dateStr].transactions[transId] = {
-          id: transId,
-          customerName: sale.customerName || '一般客',
+          id: transId, customerName: sale.customerName || '一般客',
           time: sale.timestamp ? (sale.timestamp.split(' ')[1] || sale.timestamp) : '', 
           total: 0, profit: 0, items: []
         };
       }
-
       const trans = groups[dateStr].transactions[transId];
       trans.total += sale.price;
       trans.profit += sale.profit;
       trans.items.push(sale);
       groups[dateStr].totalRevenue += sale.price;
     });
-    return Object.values(groups)
-      .sort((a, b) => {
-        if (a.date === 'Unknown') return 1;
-        if (b.date === 'Unknown') return -1;
+    return Object.values(groups).sort((a, b) => {
+        if (a.date === 'Unknown') return 1; if (b.date === 'Unknown') return -1;
         return new Date(b.date) - new Date(a.date);
-      })
-      .map(dateGroup => ({
-        ...dateGroup,
-        transactions: Object.values(dateGroup.transactions).sort((a, b) => b.id - a.id)
-      }));
+    }).map(dateGroup => ({ ...dateGroup, transactions: Object.values(dateGroup.transactions).sort((a, b) => b.id - a.id) }));
   }, [salesLog]);
 
-        // --- [新增] 預購單分組邏輯 (依照客人名稱分類) ---
   const groupedPreOrders = useMemo(() => {
     const groups = { '店內進貨/未指定': [] };
-    
     preOrders.forEach(order => {
-        // 只顯示未完成的預購
         if (order.status !== 'pending') return;
-
         const key = order.customerName ? order.customerName : '店內進貨/未指定';
         if (!groups[key]) groups[key] = [];
         groups[key].push(order);
     });
-
-    // 排序：把「店內進貨」放最前面，其他客人按名字排序
     return Object.keys(groups).sort((a,b) => {
-        if(a === '店內進貨/未指定') return -1;
-        if(b === '店內進貨/未指定') return 1;
+        if(a === '店內進貨/未指定') return -1; if(b === '店內進貨/未指定') return 1;
         return a.localeCompare(b);
-    }).reduce((obj, key) => {
-        obj[key] = groups[key];
-        return obj;
-    }, {});
+    }).reduce((obj, key) => { obj[key] = groups[key]; return obj; }, {});
   }, [preOrders]);
   
   const monthlyData = useMemo(() => {
     const stats = {};
+    // 1. 計算收入
     salesLog.forEach(sale => {
       if(!sale.timestamp) return;
       const date = new Date(sale.timestamp); 
@@ -352,16 +357,23 @@ export default function App() {
       stats[monthKey].revenue += sale.price;
       stats[monthKey].profit += sale.profit;
     });
+
+    // 2. [修正] 計算支出 (支援補登：若該月無收入但有支出，仍需建立月份記錄)
     expenses.forEach(exp => {
       if(!exp.date) return;
       const date = new Date(exp.date);
       if (isNaN(date.getTime())) return; 
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      if (stats[monthKey]) {
-          if(!stats[monthKey].profit) stats[monthKey].profit = 0;
-          stats[monthKey].profit -= exp.amount;
+      
+      // 若該月尚無資料（例如只有支出沒有收入），則初始化
+      if (!stats[monthKey]) {
+          stats[monthKey] = { month: monthKey, revenue: 0, profit: 0, source: 'system' };
       }
+      
+      stats[monthKey].profit -= exp.amount;
     });
+
+    // 3. 補入手動輸入數據
     manualMonthlyData.forEach(entry => {
       const monthEntryKey = entry.month;
       if (!stats[monthEntryKey]) {
@@ -369,21 +381,37 @@ export default function App() {
       }
       stats[monthEntryKey].profit += Number(entry.profit);
     });
+
     return Object.values(stats)
       .sort((a, b) => a.month.localeCompare(b.month))
       .slice(-12);
   }, [salesLog, manualMonthlyData, expenses]);
 
- // --- [修改] 3. 更新來客數統計 (支援手動數據) ---
+  const dailyStats = useMemo(() => {
+    if (!selectedMonth) return [];
+    const stats = {};
+    salesLog.forEach(sale => {
+        if (!sale.timestamp) return;
+        const d = new Date(sale.timestamp);
+        if (isNaN(d.getTime())) return;
+        const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        if (mKey !== selectedMonth) return;
+        const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        if (!stats[dateKey]) { stats[dateKey] = { date: dateKey, revenue: 0, profit: 0, count: 0, transactions: new Set() }; }
+        stats[dateKey].revenue += sale.price;
+        stats[dateKey].profit += sale.profit;
+        stats[dateKey].transactions.add(sale.transactionId);
+    });
+    return Object.values(stats).map(day => ({ ...day, count: day.transactions.size })).sort((a, b) => b.date.localeCompare(a.date));
+  }, [salesLog, selectedMonth]);
+
 const customerStats = useMemo(() => {
   const counts = {};
-  // A. 系統自動計算
   salesLog.forEach(sale => {
       const d = new Date(sale.timestamp);
       if(isNaN(d.getTime())) return;
       const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-
       if (customerChartUnit === 'month') {
            if (!counts[mKey]) counts[mKey] = { count: new Set(), manual: 0 };
            counts[mKey].count.add(sale.transactionId);
@@ -394,7 +422,6 @@ const customerStats = useMemo(() => {
                    counts[dKey].count.add(sale.transactionId);
                }
            } else {
-               // 近30日邏輯... (略，保持原樣或簡化)
                const thirtyDaysAgo = new Date(); thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                if (d >= thirtyDaysAgo) {
                    if (!counts[dKey]) counts[dKey] = { count: new Set(), manual: 0 };
@@ -403,8 +430,6 @@ const customerStats = useMemo(() => {
            }
       }
   });
-
-  // B. 融合手動數據 (僅針對月檢視)
   if (customerChartUnit === 'month') {
       manualMonthlyData.forEach(entry => {
           if (entry.count) {
@@ -413,26 +438,15 @@ const customerStats = useMemo(() => {
           }
       });
   }
-
-  return Object.entries(counts)
-      .map(([date, data]) => ({ date, count: data.count.size + (data.manual || 0) }))
-      .sort((a, b) => b.date.localeCompare(a.date)); // 降序排列
+  return Object.entries(counts).map(([date, data]) => ({ date, count: data.count.size + (data.manual || 0) })).sort((a, b) => b.date.localeCompare(a.date));
 }, [salesLog, customerChartUnit, selectedMonth, manualMonthlyData]);
 
-// --- [修改] 4. 更新客單價統計 (支援手動數據) ---
 const avgSpendingStats = useMemo(() => {
-  // 若為月檢視，我們改為顯示「手動輸入的平均客單」或「當月總營收/總人數」
   if (customerChartUnit === 'month') {
       const monthlyAvgs = monthlyData.map(m => {
-          // 找出手動設定的客單價
           const manualRec = manualMonthlyData.find(man => man.month === m.month);
           let finalAvg = 0;
-          
-          // 如果有手動設定客單，優先使用
-          if (manualRec && manualRec.avg) {
-              finalAvg = Number(manualRec.avg);
-          } else {
-              // 否則用系統計算 (需找到該月人數)
+          if (manualRec && manualRec.avg) { finalAvg = Number(manualRec.avg); } else {
               const custData = customerStats.find(c => c.date === m.month);
               const count = custData ? custData.count : 1;
               finalAvg = count > 0 ? Math.round(m.revenue / count) : 0;
@@ -441,52 +455,32 @@ const avgSpendingStats = useMemo(() => {
       });
       return monthlyAvgs.sort((a, b) => b.date.localeCompare(a.date));
   }
-
-  // 以下維持原本的「日檢視」邏輯
   const stats = {};
   const today = new Date();
   const thirtyDaysAgo = new Date(today);
   thirtyDaysAgo.setDate(today.getDate() - 30);
-
   salesLog.forEach(sale => {
       const d = new Date(sale.timestamp);
       if(isNaN(d.getTime())) return;
       const mKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       const dKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-
-      if (selectedMonth) { if (mKey !== selectedMonth) return; } 
-      else { if (d < thirtyDaysAgo) return; }
-      
+      if (selectedMonth) { if (mKey !== selectedMonth) return; } else { if (d < thirtyDaysAgo) return; }
       if (!stats[dKey]) stats[dKey] = { revenue: 0, transactions: new Set() };
       stats[dKey].revenue += sale.price;
       stats[dKey].transactions.add(sale.transactionId);
   });
-
-  return Object.entries(stats)
-      .map(([date, data]) => ({
-          date,
-          avg: data.transactions.size > 0 ? Math.round(data.revenue / data.transactions.size) : 0
-      }))
-      .sort((a, b) => b.date.localeCompare(a.date));
+  return Object.entries(stats).map(([date, data]) => ({ date, avg: data.transactions.size > 0 ? Math.round(data.revenue / data.transactions.size) : 0 })).sort((a, b) => b.date.localeCompare(a.date));
 }, [salesLog, selectedMonth, customerChartUnit, monthlyData, manualMonthlyData, customerStats]);
 
   // --- 業務邏輯 (寫入 Firestore) ---
   const handleAddItem = (e) => {
     e.preventDefault();
     if (!newItem.name || !newItem.price) return;
-    
     const isBatchMode = newItem.isKeg || newItem.category === 'food';
-    
-    // 1. 檢查是否為同名商品 (僅針對非批次/非生啤的瓶裝酒)
     let existingItem = null;
-    if (!isBatchMode) {
-        existingItem = inventory.find(
-            i => i.name === newItem.name && !i.isKeg && i.category === newItem.category
-        );
-    }
+    if (!isBatchMode) { existingItem = inventory.find(i => i.name === newItem.name && !i.isKeg && i.category === newItem.category); }
 
     if (existingItem) {
-        // 更新現有庫存
         const addedStock = Number(newItem.stock) || 0;
         const updatedItem = {
             ...existingItem,
@@ -499,60 +493,33 @@ const avgSpendingStats = useMemo(() => {
         dbSet('inventory', updatedItem);
         showToast(`已合併庫存：${newItem.name} (+${addedStock})`);
     } else {
-        // 新增全新項目
         const itemData = {
             id: Date.now(), 
-            name: newItem.name, 
-            brand: newItem.brand || '', 
-            style: newItem.style || (newItem.category === 'food' ? 'Food' : 'Lager'),
-            cost: Number(newItem.cost) || 0, 
-            price: Number(newItem.price) || 0,
-            stock: isBatchMode ? 1 : (Number(newItem.stock) || 0), 
-            isKeg: isBatchMode,
-            category: newItem.category || 'drink', 
-            kegRevenue: 0, 
-            glassesSold: 0, 
-            createdAt: new Date().toISOString()
+            name: newItem.name, brand: newItem.brand || '', style: newItem.style || (newItem.category === 'food' ? 'Food' : 'Lager'),
+            cost: Number(newItem.cost) || 0, price: Number(newItem.price) || 0,
+            stock: isBatchMode ? 1 : (Number(newItem.stock) || 0), isKeg: isBatchMode, category: newItem.category || 'drink', 
+            kegRevenue: 0, glassesSold: 0, createdAt: new Date().toISOString()
         };
         dbSet('inventory', itemData);
         showToast('已新增商品');
     }
-
-    // 2. 更新歷史紀錄
     const historyItem = productHistory.find(h => h.name === newItem.name);
     const historyData = { 
-        id: historyItem ? historyItem.id : Date.now() + 1, 
-        name: newItem.name, 
-        brand: newItem.brand || '', 
-        style: newItem.style || '', 
-        isKeg: newItem.isKeg, 
-        category: newItem.category,
-        cost: Number(newItem.cost),
-        price: Number(newItem.price)
+        id: historyItem ? historyItem.id : Date.now() + 1, name: newItem.name, brand: newItem.brand || '', 
+        style: newItem.style || '', isKeg: newItem.isKeg, category: newItem.category,
+        cost: Number(newItem.cost), price: Number(newItem.price)
     };
     dbSet('history', historyData);
-    
-    setNewItem(prev => ({
-        ...prev,
-        name: '',
-        cost: '',
-        price: '',
-        stock: '',
-    }));
+    setNewItem(prev => ({ ...prev, name: '', cost: '', price: '', stock: '' }));
   };
 
   const handleRestockHistoryItem = (historyItemName) => {
     const historyItem = productHistory.find(i => i.name === historyItemName);
     if (historyItem) {
       setNewItem({ 
-        ...newItem, 
-        name: historyItem.name, 
-        brand: historyItem.brand || '', 
-        style: historyItem.style || '', 
-        cost: historyItem.cost || '',   
-        price: historyItem.price || '', 
-        isKeg: historyItem.isKeg || false, 
-        category: historyItem.category || 'drink'
+        ...newItem, name: historyItem.name, brand: historyItem.brand || '', style: historyItem.style || '', 
+        cost: historyItem.cost || '', price: historyItem.price || '', 
+        isKeg: historyItem.isKeg || false, category: historyItem.category || 'drink'
       });
     }
   };
@@ -568,6 +535,13 @@ const avgSpendingStats = useMemo(() => {
     });
   };
 
+  // [新增] 庫存數量增減功能
+  const handleStockChange = (item, delta) => {
+    const newStock = (item.stock || 0) + delta;
+    if (newStock < 0) return; // 不允許負庫存
+    dbSet('inventory', { ...item, stock: newStock });
+  };
+
   const handleFinishBatch = (item) => {
     const finalProfit = item.kegRevenue - item.cost;
     const itemTypeLabel = item.category === 'food' ? '餐點批次' : '生啤桶';
@@ -577,8 +551,7 @@ const avgSpendingStats = useMemo(() => {
       isDanger: true,
       onConfirm: () => {
         const costRecord = {
-            id: Date.now(),
-            transactionId: Date.now(), itemId: item.id, name: `${item.name} (結算損益)`, customerName: '系統結算',
+            id: Date.now(), transactionId: Date.now(), itemId: item.id, name: `${item.name} (結算損益)`, customerName: '系統結算',
             type: 'keg_cost', profit: finalProfit, price: 0, date: new Date().toLocaleDateString(), timestamp: new Date().toLocaleString()
         };
         dbSet('sales', costRecord);
@@ -615,10 +588,7 @@ const avgSpendingStats = useMemo(() => {
   };
 
   const handleDeleteAddon = (id) => {
-      if(window.confirm('確定刪除此選項？')) {
-          dbDelete('addons', id);
-          showToast('選項已刪除');
-      }
+      if(window.confirm('確定刪除此選項？')) { dbDelete('addons', id); showToast('選項已刪除'); }
   };
 
   const handleAddExpense = (e) => {
@@ -635,22 +605,14 @@ const avgSpendingStats = useMemo(() => {
   };
 
   const handleDeleteExpense = (id) => {
-    if(window.confirm('確定刪除此筆支出？')) {
-        dbDelete('expenses', id);
-        showToast('支出已刪除');
-    }
+    if(window.confirm('確定刪除此筆支出？')) { dbDelete('expenses', id); showToast('支出已刪除'); }
   };
 
   const handleAddGuest = () => {
     if (!newGuestName.trim()) return;
     const newGuest = {
-      id: Date.now(), 
-      name: newGuestName, 
-      type: newGuestType, 
-      items: [], 
-      discount: 0, 
-      startTime: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-      createdAt: new Date().toISOString()
+      id: Date.now(), name: newGuestName, type: newGuestType, items: [], discount: 0, 
+      startTime: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), createdAt: new Date().toISOString()
     };
     dbSet('guests', newGuest);
     setNewGuestName('');
@@ -681,20 +643,10 @@ const avgSpendingStats = useMemo(() => {
 
   const handleAddToTab = (item) => {
     if (!item.isKeg && item.stock <= 0) { showToast('庫存不足！無法加入', 'error'); return; }
-    
-    // 1. Update Inventory (Auto-delete if 0)
     if (!item.isKeg) {
       const newStock = item.stock - 1;
-      if (newStock <= 0) {
-          dbDelete('inventory', item.id);
-          showToast(`${item.name} 完售，已從庫存移除`);
-      } else {
-          const updatedItem = { ...item, stock: newStock };
-          dbSet('inventory', updatedItem);
-      }
+      if (newStock <= 0) { dbDelete('inventory', item.id); showToast(`${item.name} 完售，已從庫存移除`); } else { const updatedItem = { ...item, stock: newStock }; dbSet('inventory', updatedItem); }
     }
-    
-    // 2. Update Guest
     const guest = activeGuests.find(g => g.id === selectedGuestId);
     if (guest) {
         const defaultType = guest.type === 'tasting' ? 'tasting' : 'sale';
@@ -707,10 +659,7 @@ const avgSpendingStats = useMemo(() => {
     const guest = activeGuests.find(g => g.id === guestId);
     if (guest) {
         const newItems = guest.items.map(item => {
-            if (item.orderId === orderId) {
-                const nextType = item.type === 'sale' ? 'tasting' : 'sale';
-                return { ...item, type: nextType };
-            }
+            if (item.orderId === orderId) { const nextType = item.type === 'sale' ? 'tasting' : 'sale'; return { ...item, type: nextType }; }
             return item;
         });
         dbSet('guests', { ...guest, items: newItems });
@@ -721,13 +670,7 @@ const avgSpendingStats = useMemo(() => {
       const guest = activeGuests.find(g => g.id === guestId);
       if (guest) {
         const newItems = guest.items.map(item => {
-            if (item.orderId === orderId) {
-                if (item.type === 'treat') {
-                    return { ...item, type: guest.type === 'tasting' ? 'tasting' : 'sale' };
-                } else {
-                    return { ...item, type: 'treat' };
-                }
-            }
+            if (item.orderId === orderId) { if (item.type === 'treat') { return { ...item, type: guest.type === 'tasting' ? 'tasting' : 'sale' }; } else { return { ...item, type: 'treat' }; } }
             return item;
         });
         dbSet('guests', { ...guest, items: newItems });
@@ -737,73 +680,34 @@ const avgSpendingStats = useMemo(() => {
   const toggleServedStatus = (guestId, orderId) => {
     const guest = activeGuests.find(g => g.id === guestId);
     if (guest) {
-        const newItems = guest.items.map(item => {
-            if (item.orderId === orderId) { return { ...item, served: !item.served }; }
-            return item;
-        });
+        const newItems = guest.items.map(item => { if (item.orderId === orderId) { return { ...item, served: !item.served }; } return item; });
         dbSet('guests', { ...guest, items: newItems });
     }
   };
 
   const updateDiscount = (guestId, amount) => {
     const guest = activeGuests.find(g => g.id === guestId);
-    if (guest) {
-        dbSet('guests', { ...guest, discount: Number(amount) || 0 });
-    }
+    if (guest) { dbSet('guests', { ...guest, discount: Number(amount) || 0 }); }
   };
 
   const handleRemoveFromTab = (guestId, orderId, itemId) => {
-    // 1. Restore Inventory (Create new if deleted)
     const guest = activeGuests.find(g => g.id === guestId);
     const orderItem = guest?.items.find(i => i.orderId === orderId);
-
     if (orderItem && !orderItem.isKeg) {
         const targetItem = inventory.find(i => i.id === itemId);
-        if (targetItem) {
-            dbSet('inventory', { ...targetItem, stock: targetItem.stock + 1 });
-        } else {
-            // Restore deleted item
-            const { orderId, type, served, selectedAddons, ...originItem } = orderItem;
-            dbSet('inventory', { ...originItem, stock: 1 });
-            showToast(`${originItem.name} 已回補至庫存`);
-        }
+        if (targetItem) { dbSet('inventory', { ...targetItem, stock: targetItem.stock + 1 }); } else { const { orderId, type, served, selectedAddons, ...originItem } = orderItem; dbSet('inventory', { ...originItem, stock: 1 }); showToast(`${originItem.name} 已回補至庫存`); }
     }
-
-    // 2. Update Guest
-    if (guest) {
-        const newItems = guest.items.filter(item => item.orderId !== orderId);
-        dbSet('guests', { ...guest, items: newItems });
-    }
+    if (guest) { const newItems = guest.items.filter(item => item.orderId !== orderId); dbSet('guests', { ...guest, items: newItems }); }
   };
 
   const handleCheckout = (guest) => {
-    if (guest.items.length === 0) {
-        dbDelete('guests', guest.id);
-        setSelectedGuestId(null);
-        return;
-    }
-
+    if (guest.items.length === 0) { dbDelete('guests', guest.id); setSelectedGuestId(null); return; }
     const calculateItemFinancials = (item) => {
-      if (item.type === 'tasting' || item.type === 'treat') {
-        if (item.isKeg) return { price: 0, profit: 0 }; 
-        return { price: 0, profit: -item.cost };
-      }
-      if (item.isKeg) return { price: item.price, profit: 0 }; 
-      return { price: item.price, profit: item.price - item.cost };
+      if (item.type === 'tasting' || item.type === 'treat') { if (item.isKeg) return { price: 0, profit: 0 }; return { price: 0, profit: -item.cost }; }
+      if (item.isKeg) return { price: item.price, profit: 0 }; return { price: item.price, profit: item.price - item.cost };
     };
-
-    const subtotal = guest.items.reduce((sum, i) => {
-      const { price } = calculateItemFinancials(i);
-      return sum + price;
-    }, 0);
-
-    const totalCostDeduction = guest.items.reduce((sum, i) => {
-      if ((i.type === 'tasting' || i.type === 'treat') && !i.isKeg) {
-        return sum + i.cost;
-      }
-      return sum;
-    }, 0);
-    
+    const subtotal = guest.items.reduce((sum, i) => { const { price } = calculateItemFinancials(i); return sum + price; }, 0);
+    const totalCostDeduction = guest.items.reduce((sum, i) => { if ((i.type === 'tasting' || i.type === 'treat') && !i.isKeg) { return sum + i.cost; } return sum; }, 0);
     const discount = guest.discount || 0;
 
     setConfirmModal({
@@ -814,47 +718,11 @@ const avgSpendingStats = useMemo(() => {
         const transactionId = Date.now();
         const dateStr = new Date().toLocaleDateString();
         const fullTimestamp = new Date().toLocaleString();
-        
         const batchUpdates = {};
-        guest.items.forEach(item => {
-            if (item.isKeg && item.type === 'sale') {
-                if (!batchUpdates[item.id]) batchUpdates[item.id] = { revenue: 0, count: 0 };
-                batchUpdates[item.id].revenue += item.price;
-                batchUpdates[item.id].count += 1;
-            }
-        });
-
-        Object.keys(batchUpdates).forEach(invId => {
-            const invItem = inventory.find(i => i.id === Number(invId));
-            if (invItem) {
-                const update = batchUpdates[invId];
-                dbSet('inventory', { 
-                    ...invItem, 
-                    kegRevenue: (invItem.kegRevenue || 0) + update.revenue, 
-                    glassesSold: (invItem.glassesSold || 0) + update.count 
-                });
-            }
-        });
-
-        guest.items.forEach((item, index) => {
-            const { price, profit } = calculateItemFinancials(item);
-            const saleRecord = {
-                id: transactionId + index, 
-                transactionId, itemId: item.id, name: item.name + (item.selectedAddons?.length ? ` (+${item.selectedAddons.map(a=>a.name).join(',')})` : ''),
-                customerName: guest.name, type: item.type || 'sale', profit, price, date: dateStr, timestamp: fullTimestamp
-            };
-            dbSet('sales', saleRecord);
-        });
-
-        if (discount > 0) {
-           const discountRecord = {
-                id: transactionId + 999,
-                transactionId, itemId: 'discount', name: '整單折扣', customerName: guest.name,
-                type: 'discount', profit: -discount, price: -discount, date: dateStr, timestamp: fullTimestamp
-            };
-            dbSet('sales', discountRecord);
-        }
-
+        guest.items.forEach(item => { if (item.isKeg && item.type === 'sale') { if (!batchUpdates[item.id]) batchUpdates[item.id] = { revenue: 0, count: 0 }; batchUpdates[item.id].revenue += item.price; batchUpdates[item.id].count += 1; } });
+        Object.keys(batchUpdates).forEach(invId => { const invItem = inventory.find(i => i.id === Number(invId)); if (invItem) { const update = batchUpdates[invId]; dbSet('inventory', { ...invItem, kegRevenue: (invItem.kegRevenue || 0) + update.revenue, glassesSold: (invItem.glassesSold || 0) + update.count }); } });
+        guest.items.forEach((item, index) => { const { price, profit } = calculateItemFinancials(item); const saleRecord = { id: transactionId + index, transactionId, itemId: item.id, name: item.name + (item.selectedAddons?.length ? ` (+${item.selectedAddons.map(a=>a.name).join(',')})` : ''), customerName: guest.name, type: item.type || 'sale', profit, price, date: dateStr, timestamp: fullTimestamp }; dbSet('sales', saleRecord); });
+        if (discount > 0) { const discountRecord = { id: transactionId + 999, transactionId, itemId: 'discount', name: '整單折扣', customerName: guest.name, type: 'discount', profit: -discount, price: -discount, date: dateStr, timestamp: fullTimestamp }; dbSet('sales', discountRecord); }
         dbDelete('guests', guest.id);
         setSelectedGuestId(null);
         showToast(`結帳完成！`, 'success');
@@ -869,169 +737,72 @@ const avgSpendingStats = useMemo(() => {
       onConfirm: () => {
         const itemCounts = {};
         guest.items.forEach(item => { if (!item.isKeg) { itemCounts[item.id] = (itemCounts[item.id] || 0) + 1; } });
-        
-        for (const [itemId, count] of Object.entries(itemCounts)) {
-             const numId = Number(itemId);
-             const invItem = inventory.find(i => i.id === numId);
-             if (invItem) {
-                 dbSet('inventory', { ...invItem, stock: invItem.stock + count });
-             } else {
-                 // Restore deleted item
-                 const prototype = guest.items.find(i => i.id === numId);
-                 if (prototype) {
-                     const { orderId, type, served, selectedAddons, ...originItem } = prototype;
-                     dbSet('inventory', { ...originItem, stock: count });
-                 }
-             }
-        }
-
-        dbDelete('guests', guest.id);
-        setSelectedGuestId(null);
-        showToast('訂單已刪除', 'success');
-        closeConfirm();
+        for (const [itemId, count] of Object.entries(itemCounts)) { const numId = Number(itemId); const invItem = inventory.find(i => i.id === numId); if (invItem) { dbSet('inventory', { ...invItem, stock: invItem.stock + count }); } else { const prototype = guest.items.find(i => i.id === numId); if (prototype) { const { orderId, type, served, selectedAddons, ...originItem } = prototype; dbSet('inventory', { ...originItem, stock: count }); } } }
+        dbDelete('guests', guest.id); setSelectedGuestId(null); showToast('訂單已刪除', 'success'); closeConfirm();
       }
     });
   };
 
-// --- [修改] 5. 更新手動資料輸入函式 (取代原本的 handleAddManualEntry) ---
 const handleAddManualEntry = (e) => {
   e.preventDefault();
   if(!manualEntry.month) return;
-  // 允許只輸入其中一項
-  
-  const entryData = { 
-      id: Date.now(), 
-      month: manualEntry.month, 
-      profit: Number(manualEntry.profit) || 0,
-      count: Number(manualEntry.count) || 0,
-      avg: Number(manualEntry.avg) || 0
-  };
-  
+  const entryData = { id: Date.now(), month: manualEntry.month, profit: Number(manualEntry.profit) || 0, count: Number(manualEntry.count) || 0, avg: Number(manualEntry.avg) || 0 };
   const existing = manualMonthlyData.find(d => d.month === manualEntry.month);
   if (existing) {
-      if(window.confirm(`該月份 (${manualEntry.month}) 已有紀錄，要覆蓋嗎？`)) {
-           // 保留原本沒改到的欄位，只更新有輸入的
-           const newProfit = manualEntry.profit ? Number(manualEntry.profit) : existing.profit;
-           const newCount = manualEntry.count ? Number(manualEntry.count) : (existing.count || 0);
-           const newAvg = manualEntry.avg ? Number(manualEntry.avg) : (existing.avg || 0);
-           
-           dbSet('manual_monthly', { ...existing, profit: newProfit, count: newCount, avg: newAvg });
-      }
-  } else {
-      dbSet('manual_monthly', entryData);
-  }
-
-  setManualEntry({ month: '', profit: '', count: '', avg: '' });
-  showToast('月報表數據已更新');
+      if(window.confirm(`該月份 (${manualEntry.month}) 已有紀錄，要覆蓋嗎？`)) { const newProfit = manualEntry.profit ? Number(manualEntry.profit) : existing.profit; const newCount = manualEntry.count ? Number(manualEntry.count) : (existing.count || 0); const newAvg = manualEntry.avg ? Number(manualEntry.avg) : (existing.avg || 0); dbSet('manual_monthly', { ...existing, profit: newProfit, count: newCount, avg: newAvg }); }
+  } else { dbSet('manual_monthly', entryData); }
+  setManualEntry({ month: '', profit: '', count: '', avg: '' }); showToast('月報表數據已更新');
 };
 
-// --- [修改] 新增預購庫存 (進貨到暫存區) ---
 const handleAddPreOrder = () => {
     if (!newPreOrder.itemName) return;
-    
     const itemData = {
-        id: Date.now(),
-        ...newPreOrder,
-        customerName: '', // 預設為空 (代表是未分配的庫存)
-        quantity: Number(newPreOrder.quantity) || 1,
-        cost: Number(newPreOrder.cost) || 0,
-        price: Number(newPreOrder.price) || 0,
-        deposit: Number(newPreOrder.deposit) || 0,
-        status: 'pending',
-        createdAt: new Date().toISOString()
+        id: Date.now(), ...newPreOrder, customerName: '', quantity: Number(newPreOrder.quantity) || 1,
+        cost: Number(newPreOrder.cost) || 0, price: Number(newPreOrder.price) || 0, deposit: Number(newPreOrder.deposit) || 0,
+        status: 'pending', createdAt: new Date().toISOString()
     };
     dbSet('pre_orders', itemData);
-    
-    // 清空表單 (保留品牌方便連續輸入)
-    setNewPreOrder(prev => ({ 
-        ...prev, itemName: '', quantity: 1, cost: '', price: '', deposit: 0 
-    }));
+    setNewPreOrder(prev => ({ ...prev, itemName: '', quantity: 1, cost: '', price: '', deposit: 0 }));
     showToast('已加入預購庫存');
 };
 
 const handlePreOrderAction = (order, action) => {
-    if (action === 'delete') {
-        if(window.confirm('確定刪除此預購單？')) dbDelete('pre_orders', order.id);
-        return;
-    }
+    if (action === 'delete') { if(window.confirm('確定刪除此預購單？')) dbDelete('pre_orders', order.id); return; }
     if (action === 'arrive') {
-        // 到貨：轉入庫存
         setConfirmModal({
-            isOpen: true, title: '預購到貨入庫',
-            message: `將「${order.itemName}」轉入庫存嗎？\n數量: ${order.quantity}`,
-            isDanger: false,
+            isOpen: true, title: '預購到貨入庫', message: `將「${order.itemName}」轉入庫存嗎？\n數量: ${order.quantity}`, isDanger: false,
             onConfirm: () => {
-                // 1. 新增到庫存
-                const inventoryItem = {
-                    id: Date.now(),
-                    name: order.itemName,
-                    brand: '預購轉入',
-                    style: order.customerName ? `客訂: ${order.customerName}` : '店內預購',
-                    cost: 0, // 需手動補成本
-                    price: Number(order.price) || 0,
-                    stock: Number(order.quantity),
-                    category: 'drink', isKeg: false, createdAt: new Date().toISOString()
-                };
+                const inventoryItem = { id: Date.now(), name: order.itemName, brand: '預購轉入', style: order.customerName ? `客訂: ${order.customerName}` : '店內預購', cost: 0, price: Number(order.price) || 0, stock: Number(order.quantity), category: 'drink', isKeg: false, createdAt: new Date().toISOString() };
                 dbSet('inventory', inventoryItem);
-                
-                // 2. 更新預購單狀態為已完成
                 dbSet('pre_orders', { ...order, status: 'arrived' });
-                
                 showToast('商品已入庫，預購單已結案');
                 closeConfirm();
             }
         });
     }
 };
-// --- [新增] 配貨邏輯：從庫存分配給客人 ---
+
 const handleAllocateStock = (stockItem, customerName, allocateQty) => {
     if (!customerName) { alert('請先輸入客人名字'); return; }
     const qty = Number(allocateQty);
     if (qty <= 0 || qty > stockItem.quantity) { alert('數量錯誤或庫存不足'); return; }
-
-    // 1. 建立客人的訂單
-    const customerOrder = {
-        ...stockItem, // 繼承原本的商品資訊 (品牌、成本、售價...)
-        id: Date.now(),
-        customerName: customerName,
-        quantity: qty,
-        status: 'pending',
-        createdAt: new Date().toISOString()
-    };
+    const customerOrder = { ...stockItem, id: Date.now(), customerName: customerName, quantity: qty, status: 'pending', createdAt: new Date().toISOString() };
     dbSet('pre_orders', customerOrder);
-
-    // 2. 扣除原本的庫存
     const remainingQty = stockItem.quantity - qty;
-    if (remainingQty === 0) {
-        // 如果分完了，刪除原本的庫存紀錄
-        dbDelete('pre_orders', stockItem.id);
-    } else {
-        // 如果還有剩，更新數量
-        dbSet('pre_orders', { ...stockItem, quantity: remainingQty });
-    }
+    if (remainingQty === 0) { dbDelete('pre_orders', stockItem.id); } else { dbSet('pre_orders', { ...stockItem, quantity: remainingQty }); }
     showToast(`已分配 ${qty} 個給 ${customerName}`);
 };
 
-
-// --- 計算總計 ---  <--- 這是第 926 行 (保留)
   const totalInventoryValue = inventory.reduce((acc, item) => acc + (item.cost * item.stock), 0);
-
-  // --- 下面這裡原本有一行重複的 totalInventoryValue，已經刪除了 ---
-  
   const totalRevenue = salesLog.reduce((acc, sale) => acc + (sale.price || 0), 0);
   const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
   const totalRealizedProfit = salesLog.reduce((acc, sale) => acc + sale.profit, 0) - totalExpenses;
-  
   const currentGuest = activeGuests.find(g => g.id === selectedGuestId);
-  const currentGuestSubtotal = currentGuest ? currentGuest.items.reduce((sum, item) => {
-      return sum + (item.type === 'tasting' || item.type === 'treat' ? 0 : item.price);
-  }, 0) : 0;
+  const currentGuestSubtotal = currentGuest ? currentGuest.items.reduce((sum, item) => { return sum + (item.type === 'tasting' || item.type === 'treat' ? 0 : item.price); }, 0) : 0;
   const currentGuestTotal = Math.max(0, currentGuestSubtotal - (currentGuest?.discount || 0));
-
   const maxMonthlyProfit = Math.max(...monthlyData.map(m => Math.abs(m.profit)), 100);
   const maxCustomerCount = Math.max(1, ...customerStats.map(c=>c.count));
   const maxAvgSpend = Math.max(1, ...avgSpendingStats.map(c => c.avg));
-
   const displayAddons = addons.length > 0 ? addons : DEFAULT_ADDONS;
 
   return (
@@ -1169,11 +940,7 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
                             onChange={(e) => {
                                 const type = e.target.value;
                                 setNewGuestType(type);
-                                if (type === 'tasting') {
-                                    setNewGuestName('自己');
-                                } else {
-                                    setNewGuestName('');
-                                }
+                                if (type === 'tasting') { setNewGuestName('自己'); } else { setNewGuestName(''); }
                             }}
                         >
                             <option value="guest">一般客</option>
@@ -1399,24 +1166,17 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
                             type="number" 
                             placeholder="預計成本" 
                             className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" 
-                            value={newPreOrder.cost} 
-                            onChange={e=>setNewPreOrder({...newPreOrder, cost: e.target.value})}
+                            value={newItem.cost} 
+                            onChange={e=>setNewItem({...newItem, cost: e.target.value})}
                         />
                         <input 
                             type="number" 
                             placeholder="預售價" 
                             className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" 
-                            value={newPreOrder.price} 
-                            onChange={e=>setNewPreOrder({...newPreOrder, price: e.target.value})}
+                            value={newItem.price} 
+                            onChange={e=>setNewItem({...newItem, price: e.target.value})}
                         />
                     </div>
-                    
-                    <button 
-                        onClick={handleAddPreOrder} 
-                        className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 rounded font-bold text-sm border border-gray-600 flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-all"
-                    >
-                        <Plus size={16} /> 加入庫存池
-                    </button>
                   <button onClick={handleAddItem} className="w-full bg-green-600 hover:bg-green-500 text-white py-2 rounded font-bold flex items-center justify-center gap-2"><Save size={16}/> 儲存入庫 (可連續輸入)</button>
                 </div>
               </div>
@@ -1459,27 +1219,55 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
             </div>
 
             <div className="mt-6">
-              <h3 className="text-gray-400 text-sm font-bold mb-2 pl-1 flex items-center gap-2"><Beer size={16}/> 瓶/罐裝庫存 ({bottleInventory.length})</h3>
-              <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
-                <table className="w-full text-left text-sm table-fixed">
-                  <thead className="bg-gray-700 text-gray-300"><tr><th className="p-3 w-[50%]">品名</th><th className="p-3 text-center w-[30%]">庫存</th><th className="p-3 text-right w-[20%]"></th></tr></thead>
-                  <tbody className="divide-y divide-gray-700">
-                    {bottleInventory.length === 0 ? (<tr><td colSpan="3" className="p-4 text-center text-gray-500 text-xs">無瓶裝商品</td></tr>) : (
-                      bottleInventory.map(item => (
-                        <tr key={item.id}>
-                          <td className="p-3">
-                              <div className="font-bold text-gray-200 flex flex-col">{item.brand && <span className="text-[10px] text-amber-500 mb-0.5">{item.brand}</span>}<span>{item.name}</span></div>
-                              <div className="text-xs text-gray-500">成本: ${item.cost} | 售價: ${item.price}</div>
-                              <div className="text-[10px] text-gray-600 mt-0.5">入庫: {formatDate(item.createdAt)}</div>
-                          </td>
-                          <td className="p-3 text-center align-middle"><span className={`px-2 py-1 rounded-full text-xs font-bold ${item.stock < 5 ? 'bg-red-900 text-red-200' : 'bg-gray-700 text-gray-300'}`}>{item.stock}</span></td>
-                          <td className="p-3 text-right align-middle"><button onClick={() => handleDeleteItem(item.id)} className="text-gray-500 hover:text-red-400 p-1"><Trash2 size={16} /></button></td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                <div className="flex justify-between items-center mb-2 px-1">
+                    <h3 className="text-gray-400 text-sm font-bold flex items-center gap-2"><Beer size={16}/> 瓶/罐裝庫存 ({bottleInventory.length})</h3>
+                    <div className="flex gap-2">
+                        <button onClick={() => handleInventoryCollapseAll(true)} className="text-xs bg-gray-800 border border-gray-600 text-gray-400 px-2 py-1 rounded hover:text-white transition-colors">全部收折</button>
+                        <button onClick={() => handleInventoryCollapseAll(false)} className="text-xs bg-gray-800 border border-gray-600 text-gray-400 px-2 py-1 rounded hover:text-white transition-colors">全部展開</button>
+                    </div>
+                </div>
+
+                {bottleInventory.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500 text-sm border border-dashed border-gray-700 rounded-xl">無瓶裝商品</div>
+                ) : (
+                    <div className="space-y-2">
+                        {sortedInventoryBrands.map(brand => (
+                            <div key={brand} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
+                                <button
+                                    onClick={() => toggleInventoryBrand(brand)}
+                                    className="w-full flex justify-between items-center p-3 bg-gray-750 hover:bg-gray-700 transition-colors"
+                                >
+                                    <div className="font-bold text-gray-200 flex items-center gap-2 text-sm">
+                                        {brand}
+                                        <span className="text-xs bg-gray-900 text-gray-400 px-2 py-0.5 rounded-full">{groupedInventory[brand].length}</span>
+                                    </div>
+                                    {expandedInventoryBrands[brand] ? <ChevronUp size={16} className="text-gray-400"/> : <ChevronDown size={16} className="text-gray-400"/>}
+                                </button>
+                                
+                                {expandedInventoryBrands[brand] && (
+                                    <div className="divide-y divide-gray-700 border-t border-gray-700 bg-gray-900/30">
+                                        {groupedInventory[brand].map(item => (
+                                            <div key={item.id} className="p-3 flex justify-between items-center hover:bg-gray-800/50">
+                                                <div className="flex-1">
+                                                    <div className="font-bold text-gray-200 text-sm">{item.name}</div>
+                                                    <div className="text-xs text-gray-500 mt-1">成本: ${item.cost} | 售價: ${item.price}</div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                     <div className="flex items-center bg-gray-900 rounded-lg border border-gray-600 overflow-hidden">
+                                                         <button onClick={() => handleStockChange(item, -1)} className="p-2 hover:bg-gray-700 active:bg-gray-600 transition-colors text-red-400"><Minus size={14}/></button>
+                                                         <div className={`w-8 text-center text-sm font-bold font-mono ${item.stock < 5 ? 'text-red-400' : 'text-white'}`}>{item.stock}</div>
+                                                         <button onClick={() => handleStockChange(item, 1)} className="p-2 hover:bg-gray-700 active:bg-gray-600 transition-colors text-green-400"><Plus size={14}/></button>
+                                                     </div>
+                                                     <button onClick={() => handleDeleteItem(item.id)} className="text-gray-600 hover:text-red-400 p-2"><Trash2 size={16} /></button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="mt-6">
@@ -1550,14 +1338,23 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
                              <input placeholder="風格/備註" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500 text-sm" value={newPreOrder.style} onChange={e=>setNewPreOrder({...newPreOrder, style: e.target.value})}/>
                         </div>
                         <div className="w-1/4">
-                             <input type="number" placeholder="總數量" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500 text-sm" value={newPreOrder.quantity} onChange={e=>setNewPreOrder({...newPreOrder, quantity: e.target.value})}/>
+                             <input type="number" placeholder="數量" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none focus:border-purple-500 text-sm" value={newPreOrder.quantity} onChange={e=>setNewPreOrder({...newPreOrder, quantity: e.target.value})}/>
                         </div>
                     </div>
-                    <div className="flex gap-2">
-                        <input type="number" placeholder="預計成本" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" value={newPreOrder.cost} onChange={e=>setNewPreOrder({...newPreOrder, cost: e.target.value})}/>
-                        <input type="number" placeholder="預售價" className="flex-1 bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" value={newPreOrder.price} onChange={e=>setNewPreOrder({...newPreOrder, price: e.target.value})}/>
-                        <button onClick={handleAddPreOrder} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded font-bold text-sm border border-gray-600">加入庫存池</button>
+                    {/* [修正] 手機版顯示：將成本與售價獨立一行並使用 Grid */}
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <label className="text-[10px] text-gray-400 block mb-1">預計成本</label>
+                            <input type="number" placeholder="$" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" value={newPreOrder.cost} onChange={e=>setNewPreOrder({...newPreOrder, cost: e.target.value})}/>
+                        </div>
+                        <div>
+                            <label className="text-[10px] text-gray-400 block mb-1">預售價</label>
+                            <input type="number" placeholder="$" className="w-full bg-gray-900 border border-gray-600 p-2 rounded text-white outline-none text-sm" value={newPreOrder.price} onChange={e=>setNewPreOrder({...newPreOrder, price: e.target.value})}/>
+                        </div>
                     </div>
+                    <button onClick={handleAddPreOrder} className="w-full mt-1 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg font-bold text-sm border border-gray-600 flex items-center justify-center gap-2">
+                        <Plus size={16}/> 加入庫存池
+                    </button>
                 </div>
             </div>
 
@@ -1807,7 +1604,8 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
                   ) : (
                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                       {customerStats.map((data) => {
-                        const widthPercent = Math.min(data.count / maxCustCount * 100, 100);
+                        // [修正] 變數名稱改為 maxCustomerCount
+                        const widthPercent = Math.min(data.count / maxCustomerCount * 100, 100);
                         return (
                           <div key={data.date} className="flex items-center gap-3 text-xs">
                               <div className="w-20 text-right text-gray-400 font-mono">{data.date.substring(5)}</div>
