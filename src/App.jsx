@@ -348,52 +348,49 @@ export default function App() {
   const monthlyData = useMemo(() => {
     const stats = {};
     
-    // 1. 計算收入 (修正：改用 transactionId 解析日期)
+    // 1. 處理銷售 (Sales)
     salesLog.forEach(sale => {
-      // 優先使用 transactionId (數值時間戳) 解析，如果沒有才用 timestamp 字串
-      // 這能避免 "2023/11/25 下午..." 這種中文格式導致日期解析失敗的問題
+      // 使用 transactionId 解析日期最準確，避免中文日期字串造成錯誤
       const dateVal = sale.transactionId || sale.timestamp;
       if (!dateVal) return;
-
-      const date = new Date(dateVal); 
-      if (isNaN(date.getTime())) return; // 防呆：確保日期有效
-
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      if (!stats[monthKey]) stats[monthKey] = { month: monthKey, revenue: 0, profit: 0, source: 'system' };
       
-      stats[monthKey].revenue += sale.price;
-      stats[monthKey].profit += sale.profit;
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return;
+
+      const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (!stats[monthKey]) stats[monthKey] = { month: monthKey, revenue: 0, profit: 0 };
+      
+      stats[monthKey].revenue += (sale.price || 0);
+      stats[monthKey].profit += (sale.profit || 0);
     });
 
-    // 2. 計算支出
+    // 2. 處理支出 (Expenses) - 關鍵修正：即使該月無營收，也要記錄支出
     expenses.forEach(exp => {
       if(!exp.date) return;
-      const date = new Date(exp.date);
-      if (isNaN(date.getTime())) return; 
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      // expense 的 date 格式通常是 YYYY-MM-DD
+      const monthKey = exp.date.substring(0, 7); // 取出 "YYYY-MM"
       
-      // 修正：如果該月還沒有資料，先幫它建立一個初始物件
       if (!stats[monthKey]) {
-          stats[monthKey] = { month: monthKey, revenue: 0, profit: 0, source: 'system' };
+          stats[monthKey] = { month: monthKey, revenue: 0, profit: 0 };
       }
       
-      // 然後再扣除支出
-      stats[monthKey].profit -= exp.amount;
+      stats[monthKey].profit -= (exp.amount || 0);
     });
 
-    // 3. 補入手動輸入數據
+    // 3. 處理手動補登 (Manual)
     manualMonthlyData.forEach(entry => {
-      const monthEntryKey = entry.month;
-      if (!stats[monthEntryKey]) {
-        stats[monthEntryKey] = { month: monthEntryKey, revenue: 0, profit: 0, source: 'manual' };
+      const monthKey = entry.month;
+      if (!stats[monthKey]) {
+        stats[monthKey] = { month: monthKey, revenue: 0, profit: 0 };
       }
-      // 注意：這裡是累加 (+=)。如果你希望手動數據完全覆蓋系統數據，請自行修改邏輯
-      stats[monthEntryKey].profit += Number(entry.profit);
+      // 這裡假設手動輸入是要「修正」利潤，如果是「累加」請用 +=
+      if (entry.profit) stats[monthKey].profit += Number(entry.profit);
     });
 
     return Object.values(stats)
       .sort((a, b) => a.month.localeCompare(b.month))
-      .slice(-12);
+      .slice(-12); // 只取最近 12 個月
   }, [salesLog, manualMonthlyData, expenses]);
 
   const dailyStats = useMemo(() => {
@@ -803,53 +800,41 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
     showToast(`已分配 ${qty} 個給 ${customerName}`);
 };
 
-  // --- 計算總計 (修改為：只計算「當前月份」) ---
+  // --- 計算總計 (邏輯修正：庫存看總值，但營收看本月) ---
   const totalInventoryValue = inventory.reduce((acc, item) => acc + (item.cost * item.stock), 0);
 
-  // 1. 取得當前月份字串 (例如 "2023-11")
+  // 1. 鎖定當前月份
   const currentMonthKey = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  }, []); // 空依賴陣列表示只在組件掛載時計算一次，或隨重整更新
+  }, []);
 
-  // 2. 篩選當月營收與利潤
-  const currentMonthStats = useMemo(() => {
-    let revenue = 0;
-    let profit = 0;
-    
-    salesLog.forEach(sale => {
-      if (!sale.timestamp) return;
-      const d = new Date(sale.timestamp);
-      if (isNaN(d.getTime())) return;
-      const saleMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      
-      if (saleMonth === currentMonthKey) {
-        revenue += (sale.price || 0);
-        profit += (sale.profit || 0);
-      }
-    });
-    return { revenue, profit };
-  }, [salesLog, currentMonthKey]);
+  // 2. 從 monthlyData 中直接抓取本月數據 (核心修正：確保跟圖表一致)
+  // 注意：這會直接使用我們剛剛修好的 monthlyData 數據，解決了日期錯誤和不同步的問題
+  const currentMonthData = monthlyData.find(m => m.month === currentMonthKey) || { revenue: 0, profit: 0 };
 
-  // 3. 篩選當月支出
+  // 3. 另外單獨計算本月支出 (僅供顯示用)
   const currentMonthExpenses = useMemo(() => {
     return expenses.reduce((acc, exp) => {
-      if (!exp.date) return acc;
-      // 支出日期格式通常為 YYYY-MM-DD，檢查是否以當月開頭
-      if (exp.date.startsWith(currentMonthKey)) {
+      if (exp.date && exp.date.startsWith(currentMonthKey)) {
         return acc + exp.amount;
       }
       return acc;
     }, 0);
   }, [expenses, currentMonthKey]);
 
-  // 4. 定義最終顯示變數
-  const totalRevenue = currentMonthStats.revenue;
+  // 4. 定義 UI 顯示的變數
+  const totalRevenue = currentMonthData.revenue;
   const totalExpenses = currentMonthExpenses;
-  const totalRealizedProfit = currentMonthStats.profit - currentMonthExpenses;
+  // 這裡直接使用 monthlyData 算出來的淨利 (已經扣過支出的)
+  const totalRealizedProfit = currentMonthData.profit;
+
+  // --- 其他 UI 輔助變數 (保留原本邏輯) ---
   const currentGuest = activeGuests.find(g => g.id === selectedGuestId);
   const currentGuestSubtotal = currentGuest ? currentGuest.items.reduce((sum, item) => { return sum + (item.type === 'tasting' || item.type === 'treat' ? 0 : item.price); }, 0) : 0;
   const currentGuestTotal = Math.max(0, currentGuestSubtotal - (currentGuest?.discount || 0));
+  
+  // 修正：maxMonthlyProfit 計算時取絕對值，避免負利潤導致圖表比例錯誤
   const maxMonthlyProfit = Math.max(...monthlyData.map(m => Math.abs(m.profit)), 100);
   const maxCustomerCount = Math.max(1, ...customerStats.map(c=>c.count));
   const maxAvgSpend = Math.max(1, ...avgSpendingStats.map(c => c.avg));
@@ -1835,5 +1820,6 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
   );
 
 }
+
 
 
