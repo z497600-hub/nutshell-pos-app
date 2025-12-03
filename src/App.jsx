@@ -347,25 +347,31 @@ export default function App() {
   
   const monthlyData = useMemo(() => {
     const stats = {};
-    // 1. 計算收入
+    
+    // 1. 計算收入 (修正：改用 transactionId 解析日期)
     salesLog.forEach(sale => {
-      if(!sale.timestamp) return;
-      const date = new Date(sale.timestamp); 
-      if (isNaN(date.getTime())) return; 
+      // 優先使用 transactionId (數值時間戳) 解析，如果沒有才用 timestamp 字串
+      // 這能避免 "2023/11/25 下午..." 這種中文格式導致日期解析失敗的問題
+      const dateVal = sale.transactionId || sale.timestamp;
+      if (!dateVal) return;
+
+      const date = new Date(dateVal); 
+      if (isNaN(date.getTime())) return; // 防呆：確保日期有效
+
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       if (!stats[monthKey]) stats[monthKey] = { month: monthKey, revenue: 0, profit: 0, source: 'system' };
+      
       stats[monthKey].revenue += sale.price;
       stats[monthKey].profit += sale.profit;
     });
 
-    // 2. [修正] 計算支出 (支援補登：若該月無收入但有支出，仍需建立月份記錄)
+    // 2. 計算支出
     expenses.forEach(exp => {
       if(!exp.date) return;
       const date = new Date(exp.date);
       if (isNaN(date.getTime())) return; 
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       
-      // 若該月尚無資料（例如只有支出沒有收入），則初始化
       if (!stats[monthKey]) {
           stats[monthKey] = { month: monthKey, revenue: 0, profit: 0, source: 'system' };
       }
@@ -379,6 +385,7 @@ export default function App() {
       if (!stats[monthEntryKey]) {
         stats[monthEntryKey] = { month: monthEntryKey, revenue: 0, profit: 0, source: 'manual' };
       }
+      // 注意：這裡是累加 (+=)。如果你希望手動數據完全覆蓋系統數據，請自行修改邏輯
       stats[monthEntryKey].profit += Number(entry.profit);
     });
 
@@ -391,8 +398,9 @@ export default function App() {
     if (!selectedMonth) return [];
     const stats = {};
     salesLog.forEach(sale => {
-        if (!sale.timestamp) return;
-        const d = new Date(sale.timestamp);
+      const dateVal = sale.transactionId || sale.timestamp; // <--- 加入這行
+      if (!dateVal) return;
+      const d = new Date(dateVal);
         if (isNaN(d.getTime())) return;
         const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
         if (mKey !== selectedMonth) return;
@@ -1825,3 +1833,4 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
   );
 
 }
+
