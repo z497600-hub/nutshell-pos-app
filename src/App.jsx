@@ -793,10 +793,50 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
     showToast(`已分配 ${qty} 個給 ${customerName}`);
 };
 
+  // --- 計算總計 (修改為：只計算「當前月份」) ---
   const totalInventoryValue = inventory.reduce((acc, item) => acc + (item.cost * item.stock), 0);
-  const totalRevenue = salesLog.reduce((acc, sale) => acc + (sale.price || 0), 0);
-  const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalRealizedProfit = salesLog.reduce((acc, sale) => acc + sale.profit, 0) - totalExpenses;
+
+  // 1. 取得當前月份字串 (例如 "2023-11")
+  const currentMonthKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []); // 空依賴陣列表示只在組件掛載時計算一次，或隨重整更新
+
+  // 2. 篩選當月營收與利潤
+  const currentMonthStats = useMemo(() => {
+    let revenue = 0;
+    let profit = 0;
+    
+    salesLog.forEach(sale => {
+      if (!sale.timestamp) return;
+      const d = new Date(sale.timestamp);
+      if (isNaN(d.getTime())) return;
+      const saleMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (saleMonth === currentMonthKey) {
+        revenue += (sale.price || 0);
+        profit += (sale.profit || 0);
+      }
+    });
+    return { revenue, profit };
+  }, [salesLog, currentMonthKey]);
+
+  // 3. 篩選當月支出
+  const currentMonthExpenses = useMemo(() => {
+    return expenses.reduce((acc, exp) => {
+      if (!exp.date) return acc;
+      // 支出日期格式通常為 YYYY-MM-DD，檢查是否以當月開頭
+      if (exp.date.startsWith(currentMonthKey)) {
+        return acc + exp.amount;
+      }
+      return acc;
+    }, 0);
+  }, [expenses, currentMonthKey]);
+
+  // 4. 定義最終顯示變數
+  const totalRevenue = currentMonthStats.revenue;
+  const totalExpenses = currentMonthExpenses;
+  const totalRealizedProfit = currentMonthStats.profit - currentMonthExpenses;
   const currentGuest = activeGuests.find(g => g.id === selectedGuestId);
   const currentGuestSubtotal = currentGuest ? currentGuest.items.reduce((sum, item) => { return sum + (item.type === 'tasting' || item.type === 'treat' ? 0 : item.price); }, 0) : 0;
   const currentGuestTotal = Math.max(0, currentGuestSubtotal - (currentGuest?.discount || 0));
@@ -1463,11 +1503,11 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-gray-800 p-4 rounded-xl border border-gray-700">
-                    <div className="text-gray-400 text-xs mb-1">總營收 (Revenue)</div>
+                    <div className="text-gray-400 text-xs mb-1">本月營收 ({currentMonthKey})</div>
                     <div className="text-2xl font-bold text-amber-400 font-mono">${totalRevenue.toLocaleString()}</div>
                   </div>
                   <div className="bg-gray-800 p-4 rounded-xl border border-gray-700">
-                    <div className="text-gray-400 text-xs mb-1">總雜支支出</div>
+                    <div className="text-gray-400 text-xs mb-1">本月雜支 ({currentMonthKey})</div>
                     <div className="text-2xl font-bold text-red-400 font-mono">${totalExpenses.toLocaleString()}</div>
                   </div>
                 </div>
@@ -1783,4 +1823,5 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
 
     </div>
   );
+
 }
