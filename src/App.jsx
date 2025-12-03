@@ -372,10 +372,12 @@ export default function App() {
       if (isNaN(date.getTime())) return; 
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       
+      // 修正：如果該月還沒有資料，先幫它建立一個初始物件
       if (!stats[monthKey]) {
           stats[monthKey] = { month: monthKey, revenue: 0, profit: 0, source: 'system' };
       }
       
+      // 然後再扣除支出
       stats[monthKey].profit -= exp.amount;
     });
 
@@ -1833,4 +1835,5 @@ const handleAllocateStock = (stockItem, customerName, allocateQty) => {
   );
 
 }
+
 
